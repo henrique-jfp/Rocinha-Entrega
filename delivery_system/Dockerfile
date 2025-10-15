@@ -22,6 +22,7 @@ COPY . .
 
 # Porta do web service (Render define $PORT)
 ENV PORT=8000
+ENV PYTHONPATH=/app
 
 # Comando padrão (web). O worker sobrescreve via SERVICE_TYPE=worker
 CMD if [ "$SERVICE_TYPE" = "worker" ]; then python bot.py; else python -m uvicorn app:app --host 0.0.0.0 --port ${PORT}; fi
