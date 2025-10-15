@@ -168,6 +168,12 @@ body { display: flex; flex-direction: column; }
   border: 1px solid #d1d5db;
 }
 .popup-btn.nav:hover { background: #e5e7eb; }
+.popup-btn.contact {
+  background: #25d366;
+  color: #fff;
+  border: 1px solid #1da851;
+}
+.popup-btn.contact:hover { background: #1da851; }
 .popup-btn.deliver {
   background: #10b981;
   color: #fff;

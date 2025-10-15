@@ -18,6 +18,7 @@ class PackageOut(BaseModel):
     neighborhood: Optional[str]
     latitude: Optional[float]
     longitude: Optional[float]
+    phone: Optional[str]
     status: str
 
     model_config = ConfigDict(from_attributes=True)
