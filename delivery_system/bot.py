@@ -44,6 +44,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 # Estados de conversa
 IMPORT_WAITING_FILE = 10
+IMPORT_ASK_SCRAPING = 11
+IMPORT_SCRAPING_READY = 12
 PHOTO1, PHOTO2, NAME, DOC, NOTES = range(5)
 ADD_DRIVER_TID, ADD_DRIVER_NAME = range(10, 12)
 SEND_SELECT_ROUTE, SEND_SELECT_DRIVER = range(20, 22)
@@ -354,16 +356,199 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         db.commit()
         
+        # Salva route_id e tracking_codes no context para usar no scraping
+        context.user_data['import_route_id'] = route.id
+        context.user_data['import_tracking_codes'] = [it["tracking_code"] for it in items]
+        context.user_data['import_package_count'] = len(items)
+        
+        # Pergunta se quer fazer scraping
+        keyboard = [['Sim', 'Não']]
         await update.message.reply_text(
-            f"✅ *Rota Importada com Sucesso!*\n\n"
+            f"✅ *Pacotes Importados!*\n\n"
             f"🆔 ID da Rota: `{route.id}`\n"
-            f"📦 Total de Pacotes: *{len(items)}*\n"
-            f"📅 Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
-            f"💡 Use /enviarrota para atribuir esta rota a um motorista.",
+            f"📦 Total de Pacotes: *{len(items)}*\n\n"
+            f"� *Deseja extrair telefones do app SPX?*\n\n"
+            f"⚠️ _Você precisará ter o celular conectado via USB com o app SPX aberto._",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
             parse_mode='Markdown'
         )
+        return IMPORT_ASK_SCRAPING
+        
+    except Exception as e:
+        db.rollback()
+        await update.message.reply_text(f"❌ Erro ao importar: {str(e)}")
+        return ConversationHandler.END
     finally:
         db.close()
+
+
+async def handle_scraping_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pergunta se quer fazer scraping de telefones"""
+    choice = (update.message.text or "").strip().lower()
+    
+    if choice in ['sim', 's']:
+        await update.message.reply_text(
+            "🤖 *Preparando Scraper de Telefones*\n\n"
+            "📱 *Instruções:*\n"
+            "1. Conecte seu celular via USB ao PC\n"
+            "2. Ative 'Depuração USB' nas configurações de desenvolvedor\n"
+            "3. Abra o app *SPX Motorista*\n"
+            "4. Vá para a aba *'Pendente'*\n"
+            "5. Deixe a lista de entregas visível\n"
+            "6. *NÃO toque no celular* durante o processo\n\n"
+            "⏱️ O scraping levará cerca de *30-60 segundos* por entrega.\n\n"
+            "Quando estiver pronto, pressione o botão abaixo:",
+            reply_markup=ReplyKeyboardMarkup([['✅ Estou Pronto!']], one_time_keyboard=True, resize_keyboard=True),
+            parse_mode='Markdown'
+        )
+        return IMPORT_SCRAPING_READY
+    else:
+        # Não quer fazer scraping - finaliza importação
+        route_id = context.user_data.get('import_route_id')
+        package_count = context.user_data.get('import_package_count', 0)
+        
+        context.user_data.clear()
+        
+        await update.message.reply_text(
+            f"✅ *Rota Criada com Sucesso!*\n\n"
+            f"🆔 ID da Rota: `{route_id}`\n"
+            f"📦 Total de Pacotes: *{package_count}*\n"
+            f"📅 Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+            f"💡 Use /enviarrota para atribuir esta rota a um motorista.",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+
+
+async def handle_scraping_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia o processo de scraping"""
+    route_id = context.user_data.get('import_route_id')
+    tracking_codes = context.user_data.get('import_tracking_codes', [])
+    
+    if not route_id or not tracking_codes:
+        await update.message.reply_text(
+            "❌ Erro: Dados da rota não encontrados.\n\nTente importar novamente.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return ConversationHandler.END
+    
+    await update.message.reply_text(
+        f"🚀 *Iniciando Scraping...*\n\n"
+        f"📦 Total de pacotes: {len(tracking_codes)}\n"
+        f"⏳ Aguarde...",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode='Markdown'
+    )
+    
+    # Importa e executa o scraper
+    try:
+        import sys
+        from pathlib import Path
+        
+        # Adiciona diretório raiz ao path
+        root_dir = Path(__file__).parent.parent
+        if str(root_dir) not in sys.path:
+            sys.path.insert(0, str(root_dir))
+        
+        # Importa o scraper
+        from spx_scraper import SPXScraper
+        
+        # Executa scraping
+        scraper = SPXScraper()
+        
+        # Verifica conexão ADB
+        if not scraper.check_adb_connection():
+            await update.message.reply_text(
+                "❌ *Erro: Celular não conectado!*\n\n"
+                "Verifique:\n"
+                "• Celular conectado via USB\n"
+                "• Depuração USB ativada\n"
+                "• Execute: `adb devices` no PC\n\n"
+                "Finalizando importação sem telefones...",
+                parse_mode='Markdown'
+            )
+            return await finalize_import_without_phones(update, context)
+        
+        # Faz o scraping
+        await update.message.reply_text(
+            "🤖 *Scraping em andamento...*\n\n"
+            "⏳ Não toque no celular!\n"
+            f"📦 Processando {len(tracking_codes)} pacotes...",
+            parse_mode='Markdown'
+        )
+        
+        results = scraper.scrape_delivery_phones(tracking_codes)
+        
+        # Atualiza pacotes no banco com os telefones
+        db = SessionLocal()
+        try:
+            updated_count = 0
+            for tracking_code, phone in results.items():
+                if phone:
+                    package = db.query(Package).filter(
+                        Package.route_id == route_id,
+                        Package.tracking_code == tracking_code
+                    ).first()
+                    
+                    if package:
+                        package.phone = phone
+                        updated_count += 1
+            
+            db.commit()
+            
+            success_rate = (updated_count / len(tracking_codes) * 100) if tracking_codes else 0
+            
+            await update.message.reply_text(
+                f"✅ *Scraping Concluído!*\n\n"
+                f"📞 Telefones extraídos: *{updated_count}/{len(tracking_codes)}* ({success_rate:.0f}%)\n"
+                f"📦 Pacotes atualizados com sucesso!\n\n"
+                f"🎉 *Rota Criada com Sucesso!*\n"
+                f"🆔 ID da Rota: `{route_id}`\n\n"
+                f"💡 Use /enviarrota para atribuir esta rota a um motorista.",
+                parse_mode='Markdown'
+            )
+            
+        finally:
+            db.close()
+        
+    except ImportError:
+        await update.message.reply_text(
+            "⚠️ *Módulo de scraping não encontrado.*\n\n"
+            "Finalizando importação sem telefones...",
+            parse_mode='Markdown'
+        )
+        return await finalize_import_without_phones(update, context)
+    
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ *Erro no scraping:* {str(e)}\n\n"
+            f"Finalizando importação sem telefones...",
+            parse_mode='Markdown'
+        )
+        return await finalize_import_without_phones(update, context)
+    
+    # Limpa dados temporários
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def finalize_import_without_phones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Finaliza importação sem scraping de telefones"""
+    route_id = context.user_data.get('import_route_id')
+    package_count = context.user_data.get('import_package_count', 0)
+    
+    context.user_data.clear()
+    
+    await update.message.reply_text(
+        f"✅ *Rota Criada!*\n\n"
+        f"🆔 ID da Rota: `{route_id}`\n"
+        f"📦 Total de Pacotes: *{package_count}*\n"
+        f"📅 Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+        f"ℹ️ _Telefones não foram extraídos._\n\n"
+        f"💡 Use /enviarrota para atribuir esta rota a um motorista.",
+        parse_mode='Markdown'
+    )
     return ConversationHandler.END
 
 
@@ -1278,6 +1463,8 @@ def build_application():
         entry_points=[CommandHandler("importar", cmd_importar)],
         states={
             IMPORT_WAITING_FILE: [MessageHandler(filters.Document.ALL, handle_import_file)],
+            IMPORT_ASK_SCRAPING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_scraping_choice)],
+            IMPORT_SCRAPING_READY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_scraping_start)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         name="import_conv",
