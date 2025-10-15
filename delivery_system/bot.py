@@ -213,17 +213,17 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             help_text = (
                 "🎯 *Central de Ajuda - Gerente*\n\n"
                 "📦 *Gestão de Rotas*\n"
-                "• /importar - Importa rotas de planilha Excel ou CSV\n"
-                "• /enviarrota - Atribui uma rota a um motorista\n\n"
+                "• `/importar` - Importa rotas de planilha Excel ou CSV\n"
+                "• `/enviarrota` - Atribui uma rota a um motorista\n\n"
                 "👥 *Gestão de Equipe*\n"
-                "• /cadastrardriver - Cadastra um novo motorista\n"
-                "• /drivers - Lista todos os motoristas cadastrados\n\n"
+                "• `/cadastrardriver` - Cadastra um novo motorista\n"
+                "• `/drivers` - Lista todos os motoristas cadastrados\n\n"
                 "💰 *Financeiro*\n"
-                "• /registrardia - Registra dados financeiros diários\n"
-                "  _(KM rodados, combustível, ganhos, salários)_\n\n"
+                "• `/registrardia` - Registra dados financeiros diários\n"
+                "  \\(KM rodados, combustível, ganhos, salários\\)\n\n"
                 "🔧 *Utilitários*\n"
-                "• /meu_id - Exibe seu Telegram ID\n"
-                "• /help - Mostra esta mensagem de ajuda\n\n"
+                "• `/meu_id` - Exibe seu Telegram ID\n"
+                "• `/help` - Mostra esta mensagem de ajuda\n\n"
                 "💡 *Dica:* Mantenha os registros financeiros atualizados diariamente!"
             )
         else:
@@ -241,8 +241,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• Documento (CPF/RG)\n"
                 "• Observações (opcional)\n\n"
                 "🔧 *Comandos:*\n"
-                "• /meu_id - Ver seu Telegram ID\n"
-                "• /help - Mostra esta mensagem\n\n"
+                "• `/meu_id` - Ver seu Telegram ID\n"
+                "• `/help` - Mostra esta mensagem\n\n"
                 "💡 *Dica:* Mantenha sua localização ativada para o gerente acompanhar!"
             )
         
