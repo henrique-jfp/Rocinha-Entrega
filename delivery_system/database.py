@@ -91,7 +91,7 @@ class Package(Base):
     neighborhood: Mapped[Optional[str]] = mapped_column(String(255))
     latitude: Mapped[Optional[float]] = mapped_column(Float)
     longitude: Mapped[Optional[float]] = mapped_column(Float)
-    phone: Mapped[Optional[str]] = mapped_column(String(20))  # Phone number of recipient
+    # phone: Mapped[Optional[str]] = mapped_column(String(20))  # Phone number of recipient - DESABILITADO (precisa migração)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     raw_data: Mapped[Optional[dict]] = mapped_column(JSON)
 

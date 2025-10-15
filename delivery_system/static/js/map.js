@@ -54,14 +54,14 @@
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';
     
-    // Botão de contato (apenas se tiver telefone)
-    let contactBtn = '';
-    if(pkg.phone){
-      const phoneClean = pkg.phone.replace(/\D/g, ''); // Remove formatação
-      const phoneFormatted = pkg.phone; // Mantém formatação original
-      const whatsapp = `https://wa.me/55${phoneClean}`;
-      contactBtn = `<a class="popup-btn contact" href="${whatsapp}" target="_blank" rel="noopener">📞 Contato</a>`;
-    }
+    // Botão de contato desabilitado temporariamente (campo phone precisa migração)
+    // let contactBtn = '';
+    // if(pkg.phone){
+    //   const phoneClean = pkg.phone.replace(/\D/g, ''); // Remove formatação
+    //   const phoneFormatted = pkg.phone; // Mantém formatação original
+    //   const whatsapp = `https://wa.me/55${phoneClean}`;
+    //   contactBtn = `<a class="popup-btn contact" href="${whatsapp}" target="_blank" rel="noopener">📞 Contato</a>`;
+    // }
     
     return `
       <div>
@@ -69,7 +69,6 @@
         <div class="popup-addr">${address}</div>
         <div class="popup-actions">
           <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener">🧭 Navegar</a>
-          ${contactBtn}
           <a class="popup-btn deliver" href="${deliver}">✓ Entregar</a>
         </div>
       </div>`;

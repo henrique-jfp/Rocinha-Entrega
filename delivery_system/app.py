@@ -18,7 +18,7 @@ class PackageOut(BaseModel):
     neighborhood: Optional[str]
     latitude: Optional[float]
     longitude: Optional[float]
-    phone: Optional[str]
+    # phone: Optional[str]  # DESABILITADO - precisa migração do banco
     status: str
 
     model_config = ConfigDict(from_attributes=True)

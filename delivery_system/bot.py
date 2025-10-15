@@ -480,20 +480,24 @@ async def handle_scraping_start(update: Update, context: ContextTypes.DEFAULT_TY
         
         results = scraper.scrape_delivery_phones(tracking_codes)
         
+        # NOTE: Campo phone desabilitado temporariamente (precisa migração do banco)
         # Atualiza pacotes no banco com os telefones
         db = SessionLocal()
         try:
             updated_count = 0
-            for tracking_code, phone in results.items():
-                if phone:
-                    package = db.query(Package).filter(
-                        Package.route_id == route_id,
-                        Package.tracking_code == tracking_code
-                    ).first()
-                    
-                    if package:
-                        package.phone = phone
-                        updated_count += 1
+            # for tracking_code, phone in results.items():
+            #     if phone:
+            #         package = db.query(Package).filter(
+            #             Package.route_id == route_id,
+            #             Package.tracking_code == tracking_code
+            #         ).first()
+            #         
+            #         if package:
+            #             package.phone = phone
+            #             updated_count += 1
+            
+            # Apenas conta quantos telefones foram encontrados
+            updated_count = sum(1 for phone in results.values() if phone)
             
             db.commit()
             
