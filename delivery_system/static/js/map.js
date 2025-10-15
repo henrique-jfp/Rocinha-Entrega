@@ -50,7 +50,11 @@
 
   function createPopupHtml(pkg){
     const nav = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
-    const deliver = `tg://resolve?domain=${botUsername}&start=deliver_${pkg.id}`;
+    
+    // Link de entrega - funciona tanto no Telegram quanto no navegador
+    const deliverTelegram = `tg://resolve?domain=${botUsername}&start=deliver_${pkg.id}`;
+    const deliverWeb = `https://t.me/${botUsername}?start=deliver_${pkg.id}`;
+    
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';
     
@@ -69,7 +73,7 @@
         <div class="popup-addr">${address}</div>
         <div class="popup-actions">
           <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener">🧭 Navegar</a>
-          <a class="popup-btn deliver" href="${deliver}">✓ Entregar</a>
+          <a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener">✓ Entregar</a>
         </div>
       </div>`;
   }
