@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: entrega-web
+    env: docker
+    rootDir: delivery_system
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: BOT_USERNAME
+        sync: false
+      - key: BASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+  healthCheckPath: /health
+    plan: standard
+  - type: worker
+    name: entrega-bot
+    env: docker
+    rootDir: delivery_system
+    autoDeploy: true
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: BOT_USERNAME
+        sync: false
+      - key: BASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+    plan: standard
