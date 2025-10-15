@@ -50,7 +50,7 @@ def create_app() -> FastAPI:
 
     @app.get("/route/{route_id}/packages", response_model=List[PackageOut])
     def get_route_packages(route_id: int, db=Depends(get_db_session)):
-        route = db.get(Route, route_id)
+        route = db.query(Route).filter(Route.id == route_id).first()
         if not route:
             raise HTTPException(status_code=404, detail="Route not found")
         packages = (
