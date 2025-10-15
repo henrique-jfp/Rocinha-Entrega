@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import google.generativeai as genai
 from dotenv import load_dotenv
 from telegram import (
     Update,
@@ -39,6 +40,14 @@ IMPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8001")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "SEU_BOT_USERNAME")
+
+# Configurar Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel('gemini-pro')
+else:
+    gemini_model = None
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 
@@ -244,7 +253,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• `/drivers` - Lista todos os motoristas cadastrados\n\n"
                 "💰 *Financeiro*\n"
                 "• `/registrardia` - Registra dados financeiros diários\n"
-                "  \\(KM rodados, combustível, ganhos, salários\\)\n\n"
+                "  \\(KM rodados, combustível, ganhos, salários\\)\n"
+                "• `/relatorio` - 🤖 *Gera relatório com IA Gemini*\n"
+                "  _Análise inteligente de desempenho e finanças_\n\n"
                 "�️ *Acompanhamento em Tempo Real:*\n"
                 "• Mapa interativo atualiza a cada *30 segundos*\n"
                 "• Veja localização do motorista em tempo real\n"
@@ -298,6 +309,158 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
         
+    finally:
+        db.close()
+
+
+async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gera relatório financeiro com análise de IA (Gemini)"""
+    db = SessionLocal()
+    try:
+        # Verifica permissão
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem gerar relatórios.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Verifica se Gemini está configurado
+        if not gemini_model:
+            await update.message.reply_text(
+                "⚠️ *IA Não Configurada*\n\n"
+                "Configure a chave da API Gemini no arquivo `.env`:\n"
+                "`GEMINI_API_KEY=sua_chave_aqui`\n\n"
+                "Obtenha sua chave gratuita em:\n"
+                "https://aistudio.google.com/app/apikey",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Envia mensagem de processamento
+        processing_msg = await update.message.reply_text(
+            "🤖 *Gerando Relatório...*\n\n"
+            "⏳ Coletando dados financeiros e de entregas...",
+            parse_mode='Markdown'
+        )
+        
+        # Coleta dados do mês atual
+        now = datetime.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        # Dados de entregas
+        total_packages = db.query(Package).filter(Package.created_at >= month_start).count()
+        delivered_packages = db.query(Package).filter(
+            Package.created_at >= month_start,
+            Package.status == "delivered"
+        ).count()
+        failed_packages = db.query(Package).filter(
+            Package.created_at >= month_start,
+            Package.status == "failed"
+        ).count()
+        
+        # Dados de rotas
+        total_routes = db.query(Route).filter(Route.created_at >= month_start).count()
+        active_drivers = db.query(User).filter(User.role == "driver").count()
+        
+        # Dados financeiros
+        total_income = db.query(Income).filter(Income.date >= month_start.date()).count()
+        total_expenses = db.query(Expense).filter(Expense.date >= month_start.date()).count()
+        total_mileage = db.query(Mileage).filter(Mileage.date >= month_start.date()).count()
+        
+        # Monta prompt para a IA
+        prompt = f"""Você é um analista financeiro especializado em logística e entregas. 
+Analise os dados abaixo e forneça um relatório completo e profissional em português do Brasil.
+
+**DADOS DO MÊS ATUAL ({now.strftime('%B/%Y')})**
+
+📦 ENTREGAS:
+- Total de pacotes: {total_packages}
+- Entregues: {delivered_packages}
+- Falhas: {failed_packages}
+- Taxa de sucesso: {(delivered_packages/total_packages*100 if total_packages > 0 else 0):.1f}%
+
+🚚 OPERAÇÕES:
+- Rotas criadas: {total_routes}
+- Motoristas ativos: {active_drivers}
+- Média pacotes/rota: {(total_packages/total_routes if total_routes > 0 else 0):.1f}
+
+💰 REGISTROS FINANCEIROS:
+- Receitas registradas: {total_income}
+- Despesas registradas: {total_expenses}
+- Registros de KM: {total_mileage}
+
+**IMPORTANTE:**
+- Forneça uma análise detalhada com insights acionáveis
+- Identifique pontos fortes e áreas de melhoria
+- Sugira ações concretas para otimização
+- Use emojis para tornar o relatório mais visual
+- Seja objetivo mas completo (máximo 800 palavras)
+- Estruture com seções: Resumo Executivo, Desempenho Operacional, Análise Financeira, Recomendações
+
+Gere o relatório agora:"""
+
+        # Atualiza mensagem
+        await processing_msg.edit_text(
+            "🤖 *Gerando Relatório...*\n\n"
+            "🧠 IA analisando dados...",
+            parse_mode='Markdown'
+        )
+        
+        # Gera relatório com Gemini
+        try:
+            response = gemini_model.generate_content(prompt)
+            ai_analysis = response.text
+            
+            # Salva no banco
+            report = AIReport(
+                user_id=me.id,
+                report_type="monthly_financial",
+                prompt_data=prompt,
+                ai_response=ai_analysis
+            )
+            db.add(report)
+            db.commit()
+            
+            # Divide relatório em mensagens (limite Telegram: 4096 chars)
+            max_length = 4000
+            if len(ai_analysis) <= max_length:
+                await processing_msg.edit_text(
+                    f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{ai_analysis}",
+                    parse_mode='Markdown'
+                )
+            else:
+                # Envia em partes
+                await processing_msg.delete()
+                parts = [ai_analysis[i:i+max_length] for i in range(0, len(ai_analysis), max_length)]
+                
+                await update.message.reply_text(
+                    f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{parts[0]}",
+                    parse_mode='Markdown'
+                )
+                
+                for part in parts[1:]:
+                    await update.message.reply_text(part, parse_mode='Markdown')
+            
+            # Mensagem final
+            await update.message.reply_text(
+                "✅ *Relatório salvo!*\n\n"
+                f"🤖 Gerado por IA Gemini\n"
+                f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
+                "_Use /relatorio novamente para atualizar._",
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            await processing_msg.edit_text(
+                f"❌ *Erro ao gerar relatório*\n\n"
+                f"Detalhes: {str(e)}\n\n"
+                f"Verifique sua chave da API Gemini.",
+                parse_mode='Markdown'
+            )
+    
     finally:
         db.close()
 
@@ -687,15 +850,22 @@ async def cmd_enviarrota(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    keyboard = [[InlineKeyboardButton(text=f"📦 {r.name or 'Rota'} (ID {r.id})", callback_data=f"sel_route:{r.id}")]
-                for r in routes[:25]]
+    
+    # Criar keyboard com botões de info e deletar
+    keyboard = []
+    for r in routes[:25]:
+        route_name = r.name or 'Rota'
+        keyboard.append([
+            InlineKeyboardButton(text=f"📦 {route_name} (ID {r.id})", callback_data=f"sel_route:{r.id}"),
+            InlineKeyboardButton(text="🗑️", callback_data=f"delete_route:{r.id}")
+        ])
+    
     await update.message.reply_text(
         "🚚 *Enviar Rota para Motorista*\n\n"
         "Selecione a rota que deseja atribuir:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
-    return SEND_SELECT_ROUTE
     return SEND_SELECT_ROUTE
 
 
@@ -800,6 +970,123 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def on_delete_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para excluir motorista"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("delete_driver:"):
+        return
+    
+    driver_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        # Verifica permissão
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await query.answer("⛔ Apenas gerentes podem excluir motoristas!", show_alert=True)
+            return
+        
+        # Busca motorista
+        driver = db.get(User, driver_id)
+        if not driver:
+            await query.answer("❌ Motorista não encontrado!", show_alert=True)
+            return
+        
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+        
+        # Verifica se tem rotas ativas
+        active_routes = db.query(Route).filter(Route.assigned_to_id == driver_id).count()
+        
+        if active_routes > 0:
+            await query.answer(
+                f"⚠️ Este motorista tem {active_routes} rota(s) ativa(s)!\n"
+                f"As rotas serão desvinculadas.",
+                show_alert=True
+            )
+            # Desvincula rotas
+            db.query(Route).filter(Route.assigned_to_id == driver_id).update({"assigned_to_id": None})
+        
+        # Deleta motorista
+        db.delete(driver)
+        db.commit()
+        
+        await query.edit_message_text(
+            f"✅ *Motorista Excluído!*\n\n"
+            f"👤 {driver_name}\n"
+            f"🗑️ Foi removido do sistema.\n\n"
+            f"Use /drivers para ver a lista atualizada.",
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
+    finally:
+        db.close()
+
+
+async def on_delete_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para excluir rota"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("delete_route:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        # Verifica permissão
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await query.answer("⛔ Apenas gerentes podem excluir rotas!", show_alert=True)
+            return
+        
+        # Busca rota
+        route = db.get(Route, route_id)
+        if not route:
+            await query.answer("❌ Rota não encontrada!", show_alert=True)
+            return
+        
+        route_name = route.name or f"Rota {route.id}"
+        
+        # Conta pacotes e entregas
+        package_count = db.query(Package).filter(Package.route_id == route_id).count()
+        delivered_count = db.query(Package).filter(
+            Package.route_id == route_id,
+            Package.status == "delivered"
+        ).count()
+        
+        if package_count > 0:
+            await query.answer(
+                f"⚠️ Esta rota tem {package_count} pacote(s)!\n"
+                f"({delivered_count} entregue(s))\n"
+                f"Todos serão deletados.",
+                show_alert=True
+            )
+        
+        # Deleta rota (cascade deleta pacotes e provas)
+        db.delete(route)
+        db.commit()
+        
+        await query.edit_message_text(
+            f"✅ *Rota Excluída!*\n\n"
+            f"📦 {route_name}\n"
+            f"🗑️ {package_count} pacote(s) removido(s)\n\n"
+            f"Use /enviarrota para ver a lista atualizada.",
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
+    finally:
+        db.close()
+
+
 # Cadastro/listagem de entregadores
 async def add_driver_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
@@ -897,10 +1184,29 @@ async def list_drivers(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    lines = [f"👤 *{d.full_name or 'Sem nome'}*\n   🆔 `{d.telegram_user_id}`" for d in drivers]
+    
+    # Cria botões inline com opção de excluir
+    buttons = []
+    for d in drivers:
+        name = d.full_name or 'Sem nome'
+        tid = d.telegram_user_id
+        buttons.append([
+            InlineKeyboardButton(
+                f"👤 {name} (ID: {tid})",
+                callback_data=f"driver_info:{d.id}"
+            ),
+            InlineKeyboardButton(
+                "🗑️",
+                callback_data=f"delete_driver:{d.id}"
+            )
+        ])
+    
+    keyboard = InlineKeyboardMarkup(buttons)
     await update.message.reply_text(
-        f"👥 *Lista de Motoristas* ({len(drivers)})\n\n" + "\n\n".join(lines),
-        parse_mode='Markdown'
+        f"👥 *Lista de Motoristas* \\({len(drivers)}\\)\n\n"
+        f"💡 _Clique em 🗑️ para excluir um motorista_",
+        reply_markup=keyboard,
+        parse_mode='MarkdownV2'
     )
 
 
@@ -1513,6 +1819,7 @@ def build_application():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
+    app.add_handler(CommandHandler("relatorio", cmd_relatorio))
 
     import_conv = ConversationHandler(
         entry_points=[CommandHandler("importar", cmd_importar)],
@@ -1530,6 +1837,8 @@ def build_application():
     app.add_handler(CommandHandler("enviarrota", cmd_enviarrota))
     app.add_handler(CallbackQueryHandler(on_select_route, pattern=r"^sel_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_select_driver, pattern=r"^sel_driver:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_delete_driver, pattern=r"^delete_driver:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_delete_route, pattern=r"^delete_route:\d+$"))
 
     delivery_conv = ConversationHandler(
         entry_points=[
