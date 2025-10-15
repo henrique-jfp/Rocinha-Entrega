@@ -13,7 +13,7 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
-  healthCheckPath: /health
+    healthCheckPath: /health
     plan: standard
   - type: worker
     name: entrega-bot
