@@ -20,8 +20,9 @@ services:
     env: docker
     rootDir: delivery_system
     autoDeploy: true
-    startCommand: python bot.py
     envVars:
+      - key: SERVICE_TYPE
+        value: worker
       - key: BOT_TOKEN
         sync: false
       - key: BOT_USERNAME
