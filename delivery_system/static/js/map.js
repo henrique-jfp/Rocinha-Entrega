@@ -20,34 +20,114 @@
   // Armazena estado anterior para detectar mudanças
   let previousPackageStates = {};
 
+  // Função para calcular distância entre dois pontos (em metros)
+  function getDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371e3; // Raio da Terra em metros
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lng2 - lng1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    return R * c; // Distância em metros
+  }
+
+  // Agrupa pacotes próximos (raio de 50 metros)
+  function clusterPackages(packages) {
+    const CLUSTER_RADIUS = 50; // metros
+    const clusters = [];
+    const processed = new Set();
+
+    packages.forEach((pkg, index) => {
+      if (processed.has(index) || !pkg.latitude || !pkg.longitude) return;
+
+      const cluster = {
+        packages: [pkg],
+        lat: pkg.latitude,
+        lng: pkg.longitude,
+        indices: [index]
+      };
+
+      // Procura outros pacotes próximos
+      packages.forEach((otherPkg, otherIndex) => {
+        if (otherIndex === index || processed.has(otherIndex)) return;
+        if (!otherPkg.latitude || !otherPkg.longitude) return;
+
+        const distance = getDistance(
+          pkg.latitude, pkg.longitude,
+          otherPkg.latitude, otherPkg.longitude
+        );
+
+        if (distance <= CLUSTER_RADIUS) {
+          cluster.packages.push(otherPkg);
+          cluster.indices.push(otherIndex);
+          processed.add(otherIndex);
+        }
+      });
+
+      processed.add(index);
+      clusters.push(cluster);
+    });
+
+    return clusters;
+  }
+
   // Custom icon com número
-  function createNumberedIcon(number, status){
+  function createNumberedIcon(number, status, isCluster = false){
     let bgColor = '#6366f1'; // pending
     if(status === 'delivered') bgColor = '#10b981';
     if(status === 'failed') bgColor = '#ef4444';
     
-    const html = `<div style="
-      width: 40px;
-      height: 40px;
-      border-radius: 50% 50% 50% 0;
-      background: ${bgColor};
-      color: #fff;
+    // Se for cluster, usa cor diferente e adiciona badge
+    const size = isCluster ? 50 : 40;
+    const fontSize = isCluster ? '16px' : '14px';
+    const clusterBadge = isCluster ? `<div style="
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background: #f59e0b;
+      color: white;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
+      font-size: 11px;
       font-weight: 700;
-      font-size: 14px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      border: 3px solid #fff;
-      transform: rotate(-45deg);
-    "><span style="transform: rotate(45deg);">${number}</span></div>`;
+      border: 2px solid white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    ">${number}</div>` : '';
+    
+    const html = `<div style="position: relative;">
+      <div style="
+        width: ${size}px;
+        height: ${size}px;
+        border-radius: 50% 50% 50% 0;
+        background: ${bgColor};
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: ${fontSize};
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        border: 3px solid #fff;
+        transform: rotate(-45deg);
+      "><span style="transform: rotate(45deg);">${isCluster ? '📦' : number}</span></div>
+      ${clusterBadge}
+    </div>`;
     
     return L.divIcon({
       html: html,
       className: 'custom-pin',
-      iconSize: [40, 40],
-      iconAnchor: [20, 40],
-      popupAnchor: [0, -40]
+      iconSize: [size, size],
+      iconAnchor: [size/2, size],
+      popupAnchor: [0, -size]
     });
   }
 
@@ -61,15 +141,6 @@
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';
     
-    // Botão de contato desabilitado temporariamente (campo phone precisa migração)
-    // let contactBtn = '';
-    // if(pkg.phone){
-    //   const phoneClean = pkg.phone.replace(/\D/g, ''); // Remove formatação
-    //   const phoneFormatted = pkg.phone; // Mantém formatação original
-    //   const whatsapp = `https://wa.me/55${phoneClean}`;
-    //   contactBtn = `<a class="popup-btn contact" href="${whatsapp}" target="_blank" rel="noopener">📞 Contato</a>`;
-    // }
-    
     return `
       <div>
         <div class="popup-code">${track}</div>
@@ -81,12 +152,111 @@
       </div>`;
   }
 
+  // Popup para cluster com múltiplos pacotes
+  function createClusterPopupHtml(packages){
+    const firstPkg = packages[0];
+    const nav = `https://www.google.com/maps?q=${firstPkg.latitude},${firstPkg.longitude}`;
+    
+    const getStatusEmoji = (status) => {
+      if(status === 'delivered') return '✅';
+      if(status === 'failed') return '❌';
+      return '📦';
+    };
+    
+    const getStatusText = (status) => {
+      if(status === 'delivered') return 'Entregue';
+      if(status === 'failed') return 'Falhou';
+      return 'Pendente';
+    };
+    
+    const packagesList = packages.map(pkg => {
+      const deliverWeb = `https://t.me/${botUsername}?start=iniciar_deliver_${pkg.id}`;
+      const emoji = getStatusEmoji(pkg.status);
+      const statusText = getStatusText(pkg.status);
+      const addr = (pkg.address || 'Sem endereço').substring(0, 50);
+      
+      return `
+        <div style="
+          padding: 8px;
+          margin: 4px 0;
+          background: ${pkg.status === 'delivered' ? '#f0fdf4' : pkg.status === 'failed' ? '#fef2f2' : '#f8fafc'};
+          border-radius: 6px;
+          border-left: 3px solid ${pkg.status === 'delivered' ? '#10b981' : pkg.status === 'failed' ? '#ef4444' : '#6366f1'};
+        ">
+          <div style="font-weight: 600; font-size: 13px; margin-bottom: 2px;">
+            ${emoji} ${pkg.tracking_code || 'Sem código'}
+          </div>
+          <div style="font-size: 11px; color: #64748b; margin-bottom: 4px;">
+            ${addr}${addr.length >= 50 ? '...' : ''}
+          </div>
+          <div style="display: flex; gap: 4px; align-items: center;">
+            <span style="font-size: 10px; color: #94a3b8; font-weight: 600;">${statusText}</span>
+            ${pkg.status === 'pending' ? `
+              <a href="${deliverWeb}" target="_blank" rel="noopener" style="
+                font-size: 10px;
+                padding: 2px 8px;
+                background: #10b981;
+                color: white;
+                border-radius: 4px;
+                text-decoration: none;
+                font-weight: 600;
+              ">Entregar</a>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    return `
+      <div style="min-width: 280px; max-width: 320px;">
+        <div style="
+          background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+          color: white;
+          padding: 12px;
+          margin: -12px -12px 12px -12px;
+          border-radius: 8px 8px 0 0;
+          font-weight: 700;
+          font-size: 14px;
+        ">
+          📍 ${packages.length} Pacote${packages.length > 1 ? 's' : ''} nesta Parada
+        </div>
+        <div style="max-height: 300px; overflow-y: auto;">
+          ${packagesList}
+        </div>
+        <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+          <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="width: 100%; text-align: center;">
+            🧭 Navegar para esta Parada
+          </a>
+        </div>
+      </div>
+    `;
+  }
+
+  // Adiciona marcador individual
   function addPackageMarker(pkg, index){
     if(!(pkg.latitude && pkg.longitude)) return null;
-    const icon = createNumberedIcon(index + 1, pkg.status);
+    const icon = createNumberedIcon(index + 1, pkg.status, false);
     const marker = L.marker([pkg.latitude, pkg.longitude], { icon }).addTo(markersLayer);
     marker.bindPopup(createPopupHtml(pkg));
     marker.pkg = pkg;
+    return marker;
+  }
+
+  // Adiciona marcador de cluster
+  function addClusterMarker(cluster, clusterIndex){
+    const packages = cluster.packages;
+    const count = packages.length;
+    
+    // Determina status dominante do cluster
+    const statuses = packages.map(p => p.status);
+    let dominantStatus = 'pending';
+    if(statuses.every(s => s === 'delivered')) dominantStatus = 'delivered';
+    else if(statuses.every(s => s === 'failed')) dominantStatus = 'failed';
+    
+    const icon = createNumberedIcon(count, dominantStatus, true);
+    const marker = L.marker([cluster.lat, cluster.lng], { icon }).addTo(markersLayer);
+    marker.bindPopup(createClusterPopupHtml(packages), { maxWidth: 340 });
+    marker.cluster = cluster;
     return marker;
   }
 
@@ -203,26 +373,47 @@
       let hasChanges = false;
       let changedPackages = [];
 
-      data.forEach((pkg, index) => {
-        const marker = addPackageMarker(pkg, index);
-        if(marker) group.push(marker.getLatLng());
-        list.appendChild(createListItem(pkg, marker, index));
+      // Agrupa pacotes próximos
+      const clusters = clusterPackages(data);
+      let displayIndex = 0;
 
-        if(pkg.status === 'delivered') delivered++;
-        else if(pkg.status === 'failed') failed++;
-        else pending++;
-        
-        // Detecta mudanças de status
-        const prevStatus = previousPackageStates[pkg.id];
-        if(prevStatus && prevStatus !== pkg.status){
-          hasChanges = true;
-          changedPackages.push({
-            tracking_code: pkg.tracking_code,
-            from: prevStatus,
-            to: pkg.status
+      clusters.forEach((cluster) => {
+        if(cluster.packages.length === 1){
+          // Pacote individual
+          const pkg = cluster.packages[0];
+          const marker = addPackageMarker(pkg, displayIndex);
+          if(marker) group.push(marker.getLatLng());
+          list.appendChild(createListItem(pkg, marker, displayIndex));
+          displayIndex++;
+        } else {
+          // Cluster com múltiplos pacotes
+          const marker = addClusterMarker(cluster, displayIndex);
+          if(marker) group.push(marker.getLatLng());
+          
+          // Adiciona cada pacote do cluster na lista
+          cluster.packages.forEach((pkg) => {
+            list.appendChild(createListItem(pkg, marker, displayIndex));
+            displayIndex++;
           });
         }
-        previousPackageStates[pkg.id] = pkg.status;
+        
+        // Conta estatísticas e detecta mudanças
+        cluster.packages.forEach((pkg) => {
+          if(pkg.status === 'delivered') delivered++;
+          else if(pkg.status === 'failed') failed++;
+          else pending++;
+          
+          const prevStatus = previousPackageStates[pkg.id];
+          if(prevStatus && prevStatus !== pkg.status){
+            hasChanges = true;
+            changedPackages.push({
+              tracking_code: pkg.tracking_code,
+              from: prevStatus,
+              to: pkg.status
+            });
+          }
+          previousPackageStates[pkg.id] = pkg.status;
+        });
       });
 
       // Update counter
