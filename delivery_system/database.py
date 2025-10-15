@@ -7,6 +7,7 @@ from typing import Optional, List
 from sqlalchemy import (
     create_engine,
     Integer,
+    BigInteger,
     String,
     DateTime,
     Float,
@@ -46,7 +47,7 @@ class User(Base):
     __tablename__ = "user"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    telegram_user_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True, index=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # 'manager' | 'driver'
 
