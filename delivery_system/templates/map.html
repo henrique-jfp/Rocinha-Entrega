@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mapa da Rota</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}">
+  <div id="layout">
+    <aside id="sidebar">
+      <h2>Pacotes</h2>
+      <ul id="package-list"></ul>
+    </aside>
+    <main id="content">
+      <div id="map"></div>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/static/js/map.js"></script>
+</body>
+</html>
