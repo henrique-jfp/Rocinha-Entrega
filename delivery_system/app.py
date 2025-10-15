@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict
 
-from database import SessionLocal, get_db_session, Package, Route, init_db
+from .database import SessionLocal, get_db_session, Package, Route, init_db
 
 
 class PackageOut(BaseModel):
