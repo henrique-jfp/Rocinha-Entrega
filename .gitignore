@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Envs
+.venv/
+**/.env
+!**/.env.example
+
+# Editor/OS
+.vscode/
+.DS_Store
+
+# App artifacts
+delivery_system/database.sqlite
+delivery_system/uploads/
+delivery_system/logs/
+delivery_system/__pycache__/
+
+# Node-like (se houver no futuro)
+node_modules/
