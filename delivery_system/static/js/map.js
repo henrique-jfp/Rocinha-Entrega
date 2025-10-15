@@ -17,6 +17,9 @@
   const markersLayer = L.layerGroup().addTo(map);
   const myLocationLayer = L.layerGroup().addTo(map);
 
+  // Armazena estado anterior para detectar mudanças
+  let previousPackageStates = {};
+
   // Custom icon com número
   function createNumberedIcon(number, status){
     let bgColor = '#6366f1'; // pending
@@ -143,6 +146,47 @@
     return li;
   }
 
+  // Mostra notificação de atualização
+  function showUpdateNotification(message, type = 'success'){
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: ${type === 'success' ? '#10b981' : '#3b82f6'};
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      font-weight: 600;
+      z-index: 10000;
+      animation: slideIn 0.3s ease-out;
+    `;
+    notification.textContent = message;
+    
+    // Adiciona animação
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from { transform: translateX(400px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(400px); opacity: 0; }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(notification);
+    
+    // Remove após 3 segundos
+    setTimeout(() => {
+      notification.style.animation = 'slideOut 0.3s ease-out';
+      setTimeout(() => notification.remove(), 300);
+    }, 3000);
+  }
+
   async function loadPackages(){
     const url = `${baseUrl}/route/${routeId}/packages`;
     try {
@@ -156,6 +200,8 @@
 
       const group = [];
       let pending = 0, delivered = 0, failed = 0;
+      let hasChanges = false;
+      let changedPackages = [];
 
       data.forEach((pkg, index) => {
         const marker = addPackageMarker(pkg, index);
@@ -165,6 +211,18 @@
         if(pkg.status === 'delivered') delivered++;
         else if(pkg.status === 'failed') failed++;
         else pending++;
+        
+        // Detecta mudanças de status
+        const prevStatus = previousPackageStates[pkg.id];
+        if(prevStatus && prevStatus !== pkg.status){
+          hasChanges = true;
+          changedPackages.push({
+            tracking_code: pkg.tracking_code,
+            from: prevStatus,
+            to: pkg.status
+          });
+        }
+        previousPackageStates[pkg.id] = pkg.status;
       });
 
       // Update counter
@@ -174,6 +232,23 @@
       if(group.length){
         const bounds = L.latLngBounds(group);
         map.fitBounds(bounds.pad(0.1));
+      }
+      
+      // Mostra notificação se houver mudanças
+      if(hasChanges){
+        const deliveredCount = changedPackages.filter(p => p.to === 'delivered').length;
+        const failedCount = changedPackages.filter(p => p.to === 'failed').length;
+        
+        let message = '✅ ';
+        if(deliveredCount > 0){
+          message += `${deliveredCount} pacote${deliveredCount > 1 ? 's' : ''} entregue${deliveredCount > 1 ? 's' : ''}`;
+        }
+        if(failedCount > 0){
+          if(deliveredCount > 0) message += ', ';
+          message += `${failedCount} falhou${failedCount > 1 ? '' : ''}`;
+        }
+        
+        showUpdateNotification(message, 'success');
       }
     } catch(err){
       console.error('Erro:', err);
@@ -229,6 +304,6 @@
   // Initial load
   loadPackages();
 
-  // Refresh every 2 min
-  setInterval(loadPackages, 120_000);
+  // Refresh every 30 seconds (atualização rápida para feedback em tempo real)
+  setInterval(loadPackages, 30_000);
 })();
