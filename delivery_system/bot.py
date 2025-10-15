@@ -822,11 +822,17 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db2.close()
     if package:
+        receiver_name = context.user_data.get('receiver_name') or '-'
+        receiver_doc = context.user_data.get('receiver_document') or '-'
+        notes = context.user_data.get('notes') or '-'
+        
         summary = (
             f"✅ *Entrega Concluída!*\n\n"
             f"📦 *Pacote:* {package.tracking_code}\n"
             f"📍 *Endereço:* {package.address or '-'}\n"
-            f"📝 *Observações:* {context.user_data.get('notes') or '-'}"
+            f"� *Recebedor:* {receiver_name}\n"
+            f"🆔 *Documento:* {receiver_doc}\n"
+            f"📝 *Observações:* {notes}"
         )
         await notify_managers(summary, context)
         # Envia as fotos aos managers para consulta/baixa no próprio Telegram
