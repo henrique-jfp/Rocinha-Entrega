@@ -1,5 +1,4 @@
 # syntax=docker/dockerfile:1
-# Dockerfile específico para o WORKER (Bot Telegram)
 
 FROM python:3.12-slim
 
@@ -8,16 +7,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Sistema básico
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Copia requirements e instala
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copia o código
 COPY . .
 
 ENV PYTHONPATH=/app
 
-# Apenas o bot Telegram
+# APENAS BOT - Telegram Bot Worker
 CMD python bot.py
