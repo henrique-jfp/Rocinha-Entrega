@@ -15,6 +15,8 @@ from sqlalchemy import (
     UniqueConstraint,
     JSON,
     CheckConstraint,
+    Date,
+    Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from pathlib import Path
@@ -122,6 +124,76 @@ class DeliveryProof(Base):
     # relationships
     package: Mapped[Package] = relationship(back_populates="proofs")
     driver: Mapped[Optional[User]] = relationship(back_populates="delivery_proofs")
+
+
+# --- Financial Models (Manager only) ---
+class Expense(Base):
+    """Registro de gastos da empresa"""
+    __tablename__ = "expense"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[datetime] = mapped_column(Date, nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)  # combustivel, salario, manutencao, outros
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    fuel_type: Mapped[Optional[str]] = mapped_column(String(50))  # gasolina, diesel, etanol (se type=combustivel)
+    fuel_liters: Mapped[Optional[float]] = mapped_column(Float)
+    employee_name: Mapped[Optional[str]] = mapped_column(String(255))  # se type=salario
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint("type in ('combustivel','salario','manutencao','outros')", name="ck_expense_type"),
+    )
+
+
+class Income(Base):
+    """Registro de ganhos (receitas) da empresa"""
+    __tablename__ = "income"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[datetime] = mapped_column(Date, nullable=False, index=True)
+    route_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("route.id", ondelete="SET NULL"))
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # relationships
+    route: Mapped[Optional[Route]] = relationship()
+
+
+class Mileage(Base):
+    """Registro de quilometragem rodada"""
+    __tablename__ = "mileage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[datetime] = mapped_column(Date, nullable=False, index=True)
+    km_start: Mapped[float] = mapped_column(Float, nullable=False)
+    km_end: Mapped[float] = mapped_column(Float, nullable=False)
+    km_total: Mapped[float] = mapped_column(Float, nullable=False)  # calculado automaticamente
+    notes: Mapped[Optional[str]] = mapped_column(String(500))
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AIReport(Base):
+    """Relatórios mensais gerados pelo Gemini AI"""
+    __tablename__ = "ai_report"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)  # 1-12
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    report_text: Mapped[str] = mapped_column(Text, nullable=False)
+    total_income: Mapped[float] = mapped_column(Float)
+    total_expenses: Mapped[float] = mapped_column(Float)
+    total_km: Mapped[float] = mapped_column(Float)
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("month", "year", name="uq_month_year"),
+    )
 
 
 def init_db() -> None:
