@@ -54,9 +54,9 @@
   function createPopupHtml(pkg){
     const nav = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
     
-    // Link de entrega - funciona tanto no Telegram quanto no navegador
-    const deliverTelegram = `tg://resolve?domain=${botUsername}&start=deliver_${pkg.id}`;
-    const deliverWeb = `https://t.me/${botUsername}?start=deliver_${pkg.id}`;
+    // Link de entrega - usa /iniciar para não conflitar com /start (cadastro)
+    const deliverTelegram = `tg://resolve?domain=${botUsername}&start=iniciar_deliver_${pkg.id}`;
+    const deliverWeb = `https://t.me/${botUsername}?start=iniciar_deliver_${pkg.id}`;
     
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';

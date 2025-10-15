@@ -158,26 +158,10 @@ async def notify_managers(text: str, context: ContextTypes.DEFAULT_TYPE):
 
 # Comandos
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /start - Cadastro inicial e boas-vindas"""
     init_db()
     u = update.effective_user
     user = register_manager_if_first(u.id, u.full_name)
-
-    args = context.args or []
-    if args and len(args) == 1 and args[0].startswith("deliver_"):
-        package_id_str = args[0].split("deliver_", 1)[1]
-        try:
-            package_id = int(package_id_str)
-        except ValueError:
-            package_id = None
-        if package_id:
-            context.user_data["deliver_package_id"] = package_id
-            await update.message.reply_text(
-                "📸 *Vamos registrar sua entrega!*\n\n"
-                "Por favor, envie a *primeira foto do pacote entregue*.\n\n"
-                "_Dica: Tire uma foto clara do pacote com a etiqueta visível._",
-                parse_mode='Markdown'
-            )
-            return PHOTO1
 
     # Mensagem de boas-vindas personalizada
     if user.role == "manager":
@@ -194,6 +178,43 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Aguarde o gerente enviar uma rota para você. Use /help se precisar de ajuda.",
             parse_mode='Markdown'
         )
+    return ConversationHandler.END
+
+
+async def cmd_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /iniciar - Inicia entrega via deep link do mapa"""
+    args = context.args or []
+    if args and len(args) == 1:
+        # Aceita tanto "iniciar_deliver_X" quanto "deliver_X"
+        arg = args[0]
+        if arg.startswith("iniciar_deliver_"):
+            package_id_str = arg.split("iniciar_deliver_", 1)[1]
+        elif arg.startswith("deliver_"):
+            package_id_str = arg.split("deliver_", 1)[1]
+        else:
+            package_id_str = None
+            
+        if package_id_str:
+            try:
+                package_id = int(package_id_str)
+                context.user_data["deliver_package_id"] = package_id
+                await update.message.reply_text(
+                    "📸 *Vamos registrar sua entrega!*\n\n"
+                    "Por favor, envie a *primeira foto do pacote entregue*.\n\n"
+                    "_Dica: Tire uma foto clara do pacote com a etiqueta visível._",
+                    parse_mode='Markdown'
+                )
+                return PHOTO1
+            except ValueError:
+                pass
+    
+    # Se chamou /iniciar sem parâmetros ou com parâmetro inválido
+    await update.message.reply_text(
+        "⚠️ Comando inválido.\n\n"
+        "Use o botão 'Entregar' no mapa interativo para iniciar uma entrega.",
+        parse_mode='Markdown'
+    )
+    return ConversationHandler.END
     return ConversationHandler.END
 
 
@@ -216,36 +237,63 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🎯 *Central de Ajuda - Gerente*\n\n"
                 "📦 *Gestão de Rotas*\n"
                 "• `/importar` - Importa rotas de planilha Excel ou CSV\n"
-                "• `/enviarrota` - Atribui uma rota a um motorista\n\n"
+                "• `/enviarrota` - Atribui uma rota a um motorista\n"
+                "  _Envia link do mapa interativo automaticamente_\n\n"
                 "👥 *Gestão de Equipe*\n"
                 "• `/cadastrardriver` - Cadastra um novo motorista\n"
                 "• `/drivers` - Lista todos os motoristas cadastrados\n\n"
                 "💰 *Financeiro*\n"
                 "• `/registrardia` - Registra dados financeiros diários\n"
                 "  \\(KM rodados, combustível, ganhos, salários\\)\n\n"
-                "🔧 *Utilitários*\n"
+                "�️ *Acompanhamento em Tempo Real:*\n"
+                "• Mapa interativo atualiza a cada *30 segundos*\n"
+                "• Veja localização do motorista em tempo real\n"
+                "• Notificações quando pacotes são entregues\n"
+                "• Histórico completo de entregas com fotos\n\n"
+                "�🔧 *Utilitários*\n"
                 "• `/meu_id` - Exibe seu Telegram ID\n"
                 "• `/help` - Mostra esta mensagem de ajuda\n\n"
-                "💡 *Dica:* Mantenha os registros financeiros atualizados diariamente!"
+                "💡 *Dicas:*\n"
+                "✅ Importe rotas pela manhã antes de enviar\n"
+                "✅ Acompanhe motoristas pelo link do mapa\n"
+                "✅ Mantenha registros financeiros atualizados\n"
+                "✅ Fotos de entrega ficam salvas no sistema"
             )
         else:
             help_text = (
                 "🎯 *Central de Ajuda - Motorista*\n\n"
-                "📍 *Como funciona:*\n"
-                "1️⃣ O gerente envia uma rota para você\n"
-                "2️⃣ Você recebe um link do mapa interativo\n"
-                "3️⃣ Siga o mapa e navegue até cada endereço\n"
-                "4️⃣ Ao entregar, clique em 'Entregar' no mapa\n"
-                "5️⃣ Tire fotos e registre a entrega\n\n"
-                "📸 *Registro de Entrega:*\n"
-                "• 2 fotos (recebedor ou pacote)\n"
-                "• Nome de quem recebeu\n"
-                "• Documento (CPF/RG)\n"
-                "• Observações (opcional)\n\n"
-                "🔧 *Comandos:*\n"
+                "📍 *Como Funciona o Sistema:*\n"
+                "1️⃣ O gerente atribui uma rota para você\n"
+                "2️⃣ Você recebe um *link do mapa interativo*\n"
+                "3️⃣ O mapa mostra todos os pacotes com pins numerados\n"
+                "4️⃣ Clique em cada pin para ver detalhes\n"
+                "5️⃣ Use o botão *'🧭 Navegar'* para abrir no Google Maps\n"
+                "6️⃣ Ao chegar no destino, clique *'✓ Entregar'*\n"
+                "7️⃣ Complete o registro de entrega no Telegram\n\n"
+                "📸 *Processo de Entrega \\(5 Passos\\):*\n"
+                "• *Foto 1:* Pacote entregue \\(com etiqueta visível\\)\n"
+                "• *Foto 2:* Local da entrega \\(porta, fachada ou recebedor\\)\n"
+                "• *Nome:* Quem recebeu o pacote\n"
+                "• *Documento:* CPF ou RG \\(ou 'sem documento'\\)\n"
+                "• *Observações:* Informações extras \\(opcional\\)\n\n"
+                "🗺️ *Recursos do Mapa:*\n"
+                "• Atualização automática a cada *30 segundos*\n"
+                "• Sua localização em tempo real \\(ponto azul\\)\n"
+                "• Contador de pacotes: pendentes/entregues\n"
+                "• Pins coloridos por status:\n"
+                "  🔵 Azul = Pendente\n"
+                "  🟢 Verde = Entregue\n"
+                "  🔴 Vermelho = Falhou\n\n"
+                "🔧 *Comandos Disponíveis:*\n"
+                "• `/entregar` - Registrar entrega manualmente\n"
                 "• `/meu_id` - Ver seu Telegram ID\n"
                 "• `/help` - Mostra esta mensagem\n\n"
-                "💡 *Dica:* Mantenha sua localização ativada para o gerente acompanhar!"
+                "💡 *Dicas Importantes:*\n"
+                "✅ Mantenha a *localização ativada* \\(gerente acompanha\\)\n"
+                "✅ Tire *fotos claras* do pacote e local\n"
+                "✅ Use o *mapa interativo* para melhor experiência\n"
+                "✅ O mapa funciona offline após carregar\n\n"
+                "❓ *Dúvidas?* Entre em contato com seu gerente\\!"
             )
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
@@ -1461,7 +1509,8 @@ def build_application():
     init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Nota: /start é tratado pelo delivery_conv para suportar deep links
+    # Comandos básicos
+    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
 
@@ -1485,7 +1534,7 @@ def build_application():
     delivery_conv = ConversationHandler(
         entry_points=[
             CommandHandler("entregar", deliver_start),
-            CommandHandler("start", cmd_start)  # Permite deep link deliver_X
+            CommandHandler("iniciar", cmd_iniciar)  # Deep link do mapa: /iniciar deliver_X
         ],
         states={
             PHOTO1: [MessageHandler(filters.PHOTO, photo1)],
