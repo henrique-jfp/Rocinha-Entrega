@@ -173,8 +173,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["deliver_package_id"] = package_id
             await update.message.reply_text(
                 "📸 *Vamos registrar sua entrega!*\n\n"
-                "Por favor, envie a *primeira foto* do recebedor ou do pacote.\n\n"
-                "_Dica: Tire uma foto clara do rosto do recebedor ou do pacote entregue._",
+                "Por favor, envie a *primeira foto do pacote entregue*.\n\n"
+                "_Dica: Tire uma foto clara do pacote com a etiqueta visível._",
                 parse_mode='Markdown'
             )
             return PHOTO1
@@ -897,8 +897,9 @@ async def photo1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
     context.user_data["photo1_file_id"] = photo.file_id
     await update.message.reply_text(
-        "📸 *Comprovante de Entrega - Passo 2/4*\n\n"
-        "Envie a *Foto 2* (local, porta ou fachada).",
+        "📸 *Comprovante de Entrega - Passo 2/5*\n\n"
+        "Agora envie a *segunda foto do local da entrega* (porta, fachada ou recebedor).\n\n"
+        "_Dica: Mostre o contexto da entrega para comprovar o local._",
         parse_mode='Markdown'
     )
     return PHOTO2
@@ -916,8 +917,8 @@ async def photo2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
     context.user_data["photo2_file_id"] = photo.file_id
     await update.message.reply_text(
-        "✏️ *Comprovante de Entrega - Passo 3/4*\n\n"
-        "Informe o *nome* de quem recebeu o pacote.",
+        "✏️ *Comprovante de Entrega - Passo 3/5*\n\n"
+        "Informe o *nome completo* de quem recebeu o pacote.",
         parse_mode='Markdown'
     )
     return NAME
@@ -928,15 +929,15 @@ async def recv_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         await update.message.reply_text(
             "❌ *Nome Vazio*\n\n"
-            "Por favor, informe o nome de quem recebeu.",
+            "Por favor, informe o nome completo de quem recebeu.",
             parse_mode='Markdown'
         )
         return NAME
     context.user_data["receiver_name"] = text
     await update.message.reply_text(
-        "🆔 *Comprovante de Entrega - Passo 4/4*\n\n"
-        "Informe o *RG* ou *CPF* de quem recebeu.\n\n"
-        "💡 _Se a pessoa não informou, digite: 'não informou'_",
+        "🆔 *Comprovante de Entrega - Passo 4/5*\n\n"
+        "Informe o *CPF* ou *RG* de quem recebeu.\n\n"
+        "💡 _Se a pessoa não informou o documento, digite: sem documento_",
         parse_mode='Markdown'
     )
     return DOC
@@ -944,12 +945,13 @@ async def recv_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def recv_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
-    context.user_data["receiver_document"] = text or "não informou"
+    context.user_data["receiver_document"] = text or "sem documento"
     kb = ReplyKeyboardMarkup([["⏭️ Pular"]], resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(
-        "📝 *Observações Adicionais*\n\n"
-        "Tem alguma observação sobre esta entrega?\n\n"
-        "💡 _Ou pressione 'Pular' para finalizar_",
+        "📝 *Comprovante de Entrega - Passo 5/5*\n\n"
+        "Tem alguma *observação* sobre esta entrega?\n"
+        "_(Exemplo: porteiro recebeu, deixado na portaria, etc)_\n\n"
+        "💡 Ou pressione *'Pular'* para finalizar.",
         reply_markup=kb,
         parse_mode='Markdown'
     )
@@ -1459,7 +1461,7 @@ def build_application():
     init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", cmd_start))
+    # Nota: /start é tratado pelo delivery_conv para suportar deep links
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
 
@@ -1481,7 +1483,10 @@ def build_application():
     app.add_handler(CallbackQueryHandler(on_select_driver, pattern=r"^sel_driver:\d+$"))
 
     delivery_conv = ConversationHandler(
-        entry_points=[CommandHandler("entregar", deliver_start)],
+        entry_points=[
+            CommandHandler("entregar", deliver_start),
+            CommandHandler("start", cmd_start)  # Permite deep link deliver_X
+        ],
         states={
             PHOTO1: [MessageHandler(filters.PHOTO, photo1)],
             PHOTO2: [MessageHandler(filters.PHOTO, photo2)],
