@@ -63,6 +63,11 @@ def create_app() -> FastAPI:
 
     @app.get("/map/{route_id}/{driver_id}", response_class=HTMLResponse)
     def map_page(route_id: int, driver_id: int, request: Request):
+        # Force HTTPS for base_url to avoid mixed content errors
+        base_url = str(request.base_url).rstrip("/")
+        if base_url.startswith("http://") and "render.com" in base_url:
+            base_url = base_url.replace("http://", "https://")
+        
         return templates.TemplateResponse(
             "map.html",
             {
@@ -70,7 +75,7 @@ def create_app() -> FastAPI:
                 "route_id": route_id,
                 "driver_id": driver_id,
                 "bot_username": BOT_USERNAME,
-                "base_url": str(request.base_url).rstrip("/")
+                "base_url": base_url
             },
         )
 
