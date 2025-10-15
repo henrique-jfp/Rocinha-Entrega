@@ -169,35 +169,96 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             package_id = None
         if package_id:
             context.user_data["deliver_package_id"] = package_id
-            await update.message.reply_text("Vamos registrar a entrega. Envie a Foto 1 do recebedor/pacote (obrigatório).")
+            await update.message.reply_text(
+                "📸 *Vamos registrar sua entrega!*\n\n"
+                "Por favor, envie a *primeira foto* do recebedor ou do pacote.\n\n"
+                "_Dica: Tire uma foto clara do rosto do recebedor ou do pacote entregue._",
+                parse_mode='Markdown'
+            )
             return PHOTO1
 
-    role_text = "manager" if user.role == "manager" else "driver"
-    
+    # Mensagem de boas-vindas personalizada
     if user.role == "manager":
         await update.message.reply_text(
-            f"Olá {u.first_name}! Você está registrado como {role_text}.\n\n"
-            f"*Comandos disponíveis:*\n"
-            f"📦 /importar - Importar rotas\n"
-            f"🚚 /enviarrota - Enviar rota para driver\n"
-            f"👤 /cadastrardriver - Cadastrar motorista\n"
-            f"👥 /drivers - Listar motoristas\n"
-            f"💰 /registrardia - Registrar dados financeiros do dia\n"
-            f"🆔 /meu_id - Ver seu ID",
+            f"👋 Olá, *{u.first_name}*!\n\n"
+            f"Bem-vindo ao sistema de entregas! Você está conectado como *Gerente*.\n\n"
+            f"Use /help para ver todos os comandos disponíveis.",
             parse_mode='Markdown'
         )
     else:
         await update.message.reply_text(
-            f"Olá {u.first_name}! Você está registrado como {role_text}.\n\n"
-            f"*Comandos disponíveis:*\n"
-            f"🆔 /meu_id - Ver seu ID",
+            f"👋 Olá, *{u.first_name}*!\n\n"
+            f"Bem-vindo ao sistema de entregas! Você está conectado como *Motorista*.\n\n"
+            f"Aguarde o gerente enviar uma rota para você. Use /help se precisar de ajuda.",
             parse_mode='Markdown'
         )
     return ConversationHandler.END
 
 
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando de ajuda personalizado por role"""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_user_id == update.effective_user.id).first()
+        
+        if not user:
+            await update.message.reply_text(
+                "⚠️ Você ainda não está registrado.\n\n"
+                "Use /start para começar!",
+                parse_mode='Markdown'
+            )
+            return
+        
+        if user.role == "manager":
+            help_text = (
+                "🎯 *Central de Ajuda - Gerente*\n\n"
+                "📦 *Gestão de Rotas*\n"
+                "• /importar - Importa rotas de planilha Excel ou CSV\n"
+                "• /enviarrota - Atribui uma rota a um motorista\n\n"
+                "👥 *Gestão de Equipe*\n"
+                "• /cadastrardriver - Cadastra um novo motorista\n"
+                "• /drivers - Lista todos os motoristas cadastrados\n\n"
+                "💰 *Financeiro*\n"
+                "• /registrardia - Registra dados financeiros diários\n"
+                "  _(KM rodados, combustível, ganhos, salários)_\n\n"
+                "🔧 *Utilitários*\n"
+                "• /meu_id - Exibe seu Telegram ID\n"
+                "• /help - Mostra esta mensagem de ajuda\n\n"
+                "💡 *Dica:* Mantenha os registros financeiros atualizados diariamente!"
+            )
+        else:
+            help_text = (
+                "🎯 *Central de Ajuda - Motorista*\n\n"
+                "📍 *Como funciona:*\n"
+                "1️⃣ O gerente envia uma rota para você\n"
+                "2️⃣ Você recebe um link do mapa interativo\n"
+                "3️⃣ Siga o mapa e navegue até cada endereço\n"
+                "4️⃣ Ao entregar, clique em 'Entregar' no mapa\n"
+                "5️⃣ Tire fotos e registre a entrega\n\n"
+                "📸 *Registro de Entrega:*\n"
+                "• 2 fotos (recebedor ou pacote)\n"
+                "• Nome de quem recebeu\n"
+                "• Documento (CPF/RG)\n"
+                "• Observações (opcional)\n\n"
+                "🔧 *Comandos:*\n"
+                "• /meu_id - Ver seu Telegram ID\n"
+                "• /help - Mostra esta mensagem\n\n"
+                "💡 *Dica:* Mantenha sua localização ativada para o gerente acompanhar!"
+            )
+        
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+        
+    finally:
+        db.close()
+
+
 async def cmd_meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Seu Telegram User ID é: {update.effective_user.id}")
+    await update.message.reply_text(
+        f"🆔 *Seu Telegram ID*\n\n"
+        f"ID: `{update.effective_user.id}`\n\n"
+        f"_Copie este número se o gerente solicitar._",
+        parse_mode='Markdown'
+    )
 
 
 async def cmd_importar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -205,27 +266,55 @@ async def cmd_importar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         me = get_user_by_tid(db, update.effective_user.id)
         if not me or me.role != "manager":
-            await update.message.reply_text("Apenas managers podem importar rotas.")
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem importar rotas.\n\n"
+                "Se você é motorista, aguarde o gerente enviar as rotas para você!",
+                parse_mode='Markdown'
+            )
             return ConversationHandler.END
     finally:
         db.close()
-    await update.message.reply_text("Envie o arquivo .xlsx ou .csv desta conversa.")
+    
+    await update.message.reply_text(
+        "📂 *Importar Nova Rota*\n\n"
+        "Envie um arquivo Excel (.xlsx) ou CSV (.csv) com as seguintes colunas:\n\n"
+        "• *Código de Rastreio* (obrigatório)\n"
+        "• *Endereço* (obrigatório)\n"
+        "• *Latitude* (opcional)\n"
+        "• *Longitude* (opcional)\n"
+        "• *Bairro* (opcional)\n\n"
+        "💡 _O sistema reconhece automaticamente os nomes das colunas._",
+        parse_mode='Markdown'
+    )
     return IMPORT_WAITING_FILE
 
 
 async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
     if not doc:
-        await update.message.reply_text("Por favor, envie um arquivo .xlsx ou .csv.")
+        await update.message.reply_text(
+            "❌ Nenhum arquivo detectado.\n\nPor favor, envie um arquivo .xlsx ou .csv.",
+            parse_mode='Markdown'
+        )
         return IMPORT_WAITING_FILE
 
     filename = doc.file_name or f"import_{update.message.message_id}"
     suffix = Path(filename).suffix.lower()
     if suffix not in [".xlsx", ".csv"]:
-        await update.message.reply_text("Formato inválido. Envie um .xlsx ou .csv.")
+        await update.message.reply_text(
+            "⚠️ *Formato Inválido*\n\n"
+            "Por favor, envie apenas arquivos:\n"
+            "• Excel (.xlsx)\n"
+            "• CSV (.csv)\n\n"
+            f"Arquivo recebido: `{suffix}`",
+            parse_mode='Markdown'
+        )
         return IMPORT_WAITING_FILE
 
     await update.message.chat.send_action(action=ChatAction.UPLOAD_DOCUMENT)
+    await update.message.reply_text("⏳ Processando arquivo...", parse_mode='Markdown')
+    
     file = await doc.get_file()
     local_path = IMPORTS_DIR / filename
     await file.download_to_drive(local_path)
@@ -233,14 +322,23 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     df = pd.read_excel(local_path) if suffix == ".xlsx" else pd.read_csv(local_path)
     items = parse_import_dataframe(df)
     if not items:
-        await update.message.reply_text("Não encontrei linhas válidas no arquivo.")
+        await update.message.reply_text(
+            "❌ *Erro ao Processar*\n\n"
+            "Não encontrei dados válidos no arquivo.\n\n"
+            "Verifique se o arquivo possui:\n"
+            "• Pelo menos uma coluna com códigos de rastreio\n"
+            "• Dados nas linhas (não apenas cabeçalhos)",
+            parse_mode='Markdown'
+        )
         return ConversationHandler.END
 
     db = SessionLocal()
     try:
-        route = Route(name=f"Rota {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        route_name = f"📦 Rota {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+        route = Route(name=route_name)
         db.add(route)
         db.flush()
+        
         for it in items:
             db.add(
                 Package(
@@ -255,7 +353,15 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
             )
         db.commit()
-        await update.message.reply_text(f"Rota importada com sucesso! ID da Rota: {route.id}. Pacotes: {len(items)}")
+        
+        await update.message.reply_text(
+            f"✅ *Rota Importada com Sucesso!*\n\n"
+            f"🆔 ID da Rota: `{route.id}`\n"
+            f"📦 Total de Pacotes: *{len(items)}*\n"
+            f"📅 Data: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+            f"💡 Use /enviarrota para atribuir esta rota a um motorista.",
+            parse_mode='Markdown'
+        )
     finally:
         db.close()
     return ConversationHandler.END
@@ -266,7 +372,11 @@ async def cmd_enviarrota(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         me = get_user_by_tid(db, update.effective_user.id)
         if not me or me.role != "manager":
-            await update.message.reply_text("Apenas managers podem enviar rota.")
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem enviar rotas para motoristas.",
+                parse_mode='Markdown'
+            )
             return
         args = context.args or []
         if len(args) == 2:
@@ -274,11 +384,19 @@ async def cmd_enviarrota(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 route_id = int(args[0])
                 driver_tid = int(args[1])
             except ValueError:
-                await update.message.reply_text("IDs inválidos.")
+                await update.message.reply_text(
+                    "❌ *IDs Inválidos*\n\n"
+                    "Use: `/enviarrota <id_rota> <id_motorista>`",
+                    parse_mode='Markdown'
+                )
                 return
             route = db.get(Route, route_id)
             if not route:
-                await update.message.reply_text("Rota não encontrada.")
+                await update.message.reply_text(
+                    "❌ *Rota Não Encontrada*\n\n"
+                    f"Não existe rota com ID `{route_id}`.",
+                    parse_mode='Markdown'
+                )
                 return
             driver = get_user_by_tid(db, driver_tid)
             if not driver:
@@ -290,10 +408,31 @@ async def cmd_enviarrota(update: Update, context: ContextTypes.DEFAULT_TYPE):
             count = db.query(Package).filter(Package.route_id == route.id).count()
             link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
             try:
-                await context.bot.send_message(chat_id=driver_tid, text=f"Você recebeu uma nova rota! {count} pacotes. Abra o mapa para começar: {link}")
-                await update.message.reply_text("Rota enviada ao entregador.")
+                await context.bot.send_message(
+                    chat_id=driver_tid,
+                    text=(
+                        f"🎯 *Nova Rota Atribuída!*\n\n"
+                        f"📦 Total de Pacotes: *{count}*\n"
+                        f"🗺️ Mapa Interativo: [Clique Aqui]({link})\n\n"
+                        f"💡 _Abra o mapa para ver todas as entregas e começar!_"
+                    ),
+                    parse_mode='Markdown'
+                )
+                await update.message.reply_text(
+                    f"✅ *Rota Enviada!*\n\n"
+                    f"O motorista recebeu a notificação com o link do mapa.",
+                    parse_mode='Markdown'
+                )
             except Exception:
-                await update.message.reply_text("Não consegui enviar ao entregador. Ele já iniciou o bot com /start?")
+                await update.message.reply_text(
+                    "⚠️ *Erro ao Enviar*\n\n"
+                    "Não consegui enviar a mensagem ao motorista.\n\n"
+                    "Possíveis causas:\n"
+                    "• O motorista ainda não iniciou conversa com o bot\n"
+                    "• O ID do motorista está incorreto\n\n"
+                    "💡 Peça ao motorista para enviar /start no bot.",
+                    parse_mode='Markdown'
+                )
             return
     finally:
         db.close()
@@ -305,11 +444,21 @@ async def cmd_enviarrota(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
     if not routes:
-        await update.message.reply_text("Nenhuma rota importada ainda. Use /importar primeiro.")
+        await update.message.reply_text(
+            "📭 *Nenhuma Rota Disponível*\n\n"
+            "Use /importar para criar uma nova rota primeiro!",
+            parse_mode='Markdown'
+        )
         return
-    keyboard = [[InlineKeyboardButton(text=f"{r.name or 'Rota'} (ID {r.id})", callback_data=f"sel_route:{r.id}")]
+    keyboard = [[InlineKeyboardButton(text=f"📦 {r.name or 'Rota'} (ID {r.id})", callback_data=f"sel_route:{r.id}")]
                 for r in routes[:25]]
-    await update.message.reply_text("Qual rota você deseja enviar?", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        "🚚 *Enviar Rota para Motorista*\n\n"
+        "Selecione a rota que deseja atribuir:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+    return SEND_SELECT_ROUTE
     return SEND_SELECT_ROUTE
 
 
@@ -328,13 +477,22 @@ async def on_select_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
     if not drivers:
-        await query.edit_message_text("Nenhum entregador cadastrado ainda. Use /cadastrardriver para cadastrar.")
+        await query.edit_message_text(
+            "👥 *Nenhum Motorista Cadastrado*\n\n"
+            "Use /cadastrardriver para adicionar motoristas primeiro!",
+            parse_mode='Markdown'
+        )
         return ConversationHandler.END
 
-    keyboard = [[InlineKeyboardButton(text=f"{(d.full_name or 'Sem nome')} (ID {d.telegram_user_id})",
+    keyboard = [[InlineKeyboardButton(text=f"👤 {(d.full_name or 'Sem nome')} (ID {d.telegram_user_id})",
                                        callback_data=f"sel_driver:{d.telegram_user_id}")]
                 for d in drivers[:25]]
-    await query.edit_message_text("Para qual entregador deseja enviar?", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text(
+        f"🚚 *Rota Selecionada: ID {route_id}*\n\n"
+        f"Agora escolha o motorista que receberá esta rota:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
     return SEND_SELECT_DRIVER
 
 
@@ -347,14 +505,22 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
     driver_tid = int(data.split(":", 1)[1])
     route_id = context.user_data.get("send_route_id")
     if not route_id:
-        await query.edit_message_text("Rota não selecionada.")
+        await query.edit_message_text(
+            "❌ *Erro Interno*\n\n"
+            "Rota não selecionada. Tente novamente com /enviarrota.",
+            parse_mode='Markdown'
+        )
         return ConversationHandler.END
 
     db = SessionLocal()
     try:
         route = db.get(Route, int(route_id))
         if not route:
-            await query.edit_message_text("Rota não encontrada.")
+            await query.edit_message_text(
+                "❌ *Rota Não Encontrada*\n\n"
+                f"A rota ID `{route_id}` não existe mais.",
+                parse_mode='Markdown'
+            )
             return ConversationHandler.END
         driver = get_user_by_tid(db, driver_tid)
         if not driver:
@@ -366,10 +532,31 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
         count = db.query(Package).filter(Package.route_id == route.id).count()
         link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
         try:
-            await context.bot.send_message(chat_id=driver_tid, text=f"Você recebeu uma nova rota! {count} pacotes. Abra o mapa para começar: {link}")
-            await query.edit_message_text("Rota enviada ao entregador.")
+            await context.bot.send_message(
+                chat_id=driver_tid,
+                text=(
+                    f"🎯 *Nova Rota Atribuída!*\n\n"
+                    f"📦 Total de Pacotes: *{count}*\n"
+                    f"🗺️ Mapa Interativo: [Clique Aqui]({link})\n\n"
+                    f"💡 _Abra o mapa para ver todas as entregas e começar!_"
+                ),
+                parse_mode='Markdown'
+            )
+            await query.edit_message_text(
+                "✅ *Rota Enviada!*\n\n"
+                "O motorista recebeu a notificação com o link do mapa.",
+                parse_mode='Markdown'
+            )
         except Exception:
-            await query.edit_message_text("Não consegui enviar ao entregador. Ele já iniciou o bot com /start?")
+            await query.edit_message_text(
+                "⚠️ *Erro ao Enviar*\n\n"
+                "Não consegui enviar a mensagem ao motorista.\n\n"
+                "Possíveis causas:\n"
+                "• O motorista ainda não iniciou conversa com o bot\n"
+                "• O ID do motorista está incorreto\n\n"
+                "💡 Peça ao motorista para enviar /start no bot.",
+                parse_mode='Markdown'
+            )
     finally:
         db.close()
     context.user_data.pop("send_route_id", None)
@@ -382,11 +569,20 @@ async def add_driver_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         me = get_user_by_tid(db, update.effective_user.id)
         if not me or me.role != "manager":
-            await update.message.reply_text("Apenas managers podem cadastrar entregadores.")
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem cadastrar motoristas.",
+                parse_mode='Markdown'
+            )
             return ConversationHandler.END
     finally:
         db.close()
-    await update.message.reply_text("Informe o Telegram User ID do entregador (número).")
+    await update.message.reply_text(
+        "👤 *Cadastrar Novo Motorista*\n\n"
+        "Informe o *Telegram User ID* do motorista.\n\n"
+        "💡 _O motorista pode descobrir seu ID usando /meu\\_id_",
+        parse_mode='Markdown'
+    )
     return ADD_DRIVER_TID
 
 
@@ -395,17 +591,30 @@ async def add_driver_tid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         tid = int(txt)
     except ValueError:
-        await update.message.reply_text("ID inválido. Digite apenas números.")
+        await update.message.reply_text(
+            "❌ *ID Inválido*\n\n"
+            "Digite apenas números.\n\n"
+            "Exemplo: `123456789`",
+            parse_mode='Markdown'
+        )
         return ADD_DRIVER_TID
     context.user_data["new_driver_tid"] = tid
-    await update.message.reply_text("Informe o nome completo do entregador.")
+    await update.message.reply_text(
+        "✏️ *Quase Lá!*\n\n"
+        "Agora informe o *nome completo* do motorista.",
+        parse_mode='Markdown'
+    )
     return ADD_DRIVER_NAME
 
 
 async def add_driver_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = (update.message.text or "").strip()
     if not name:
-        await update.message.reply_text("Nome inválido. Tente novamente.")
+        await update.message.reply_text(
+            "❌ *Nome Vazio*\n\n"
+            "Por favor, informe um nome válido.",
+            parse_mode='Markdown'
+        )
         return ADD_DRIVER_NAME
     tid = context.user_data.get("new_driver_tid")
     db = SessionLocal()
@@ -420,7 +629,13 @@ async def add_driver_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
     context.user_data.pop("new_driver_tid", None)
-    await update.message.reply_text("Entregador cadastrado/atualizado com sucesso.")
+    await update.message.reply_text(
+        f"✅ *Motorista Cadastrado!*\n\n"
+        f"👤 *Nome:* {name}\n"
+        f"🆔 *ID:* `{tid}`\n\n"
+        f"💡 _Você já pode enviar rotas com /enviarrota_",
+        parse_mode='Markdown'
+    )
     return ConversationHandler.END
 
 
@@ -429,77 +644,132 @@ async def list_drivers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         me = get_user_by_tid(db, update.effective_user.id)
         if not me or me.role != "manager":
-            await update.message.reply_text("Apenas managers podem listar entregadores.")
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem listar motoristas.",
+                parse_mode='Markdown'
+            )
             return
         drivers = db.query(User).filter(User.role == "driver").order_by(User.id.desc()).all()
     finally:
         db.close()
     if not drivers:
-        await update.message.reply_text("Nenhum entregador cadastrado.")
+        await update.message.reply_text(
+            "👥 *Nenhum Motorista Cadastrado*\n\n"
+            "Use /cadastrardriver para adicionar o primeiro motorista!",
+            parse_mode='Markdown'
+        )
         return
-    lines = [f"- {d.full_name or 'Sem nome'} (Telegram ID: {d.telegram_user_id})" for d in drivers]
-    await update.message.reply_text("Entregadores:\n" + "\n".join(lines))
+    lines = [f"👤 *{d.full_name or 'Sem nome'}*\n   🆔 `{d.telegram_user_id}`" for d in drivers]
+    await update.message.reply_text(
+        f"👥 *Lista de Motoristas* ({len(drivers)})\n\n" + "\n\n".join(lines),
+        parse_mode='Markdown'
+    )
 
 
 # Fluxo de entrega
 async def deliver_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
     if len(args) != 1:
-        await update.message.reply_text("Uso: /entregar <package_id>")
+        await update.message.reply_text(
+            "❌ *Comando Incorreto*\n\n"
+            "Uso: `/entregar <id_pacote>`\n\n"
+            "💡 _Use o botão 'Entregar' no mapa interativo!_",
+            parse_mode='Markdown'
+        )
         return ConversationHandler.END
     try:
         package_id = int(args[0])
     except ValueError:
-        await update.message.reply_text("package_id inválido.")
+        await update.message.reply_text(
+            "❌ *ID Inválido*\n\n"
+            "O ID do pacote deve ser um número.",
+            parse_mode='Markdown'
+        )
         return ConversationHandler.END
     context.user_data["deliver_package_id"] = package_id
-    await update.message.reply_text("Envie a Foto 1 do recebedor/pacote (obrigatório).")
+    await update.message.reply_text(
+        "📸 *Comprovante de Entrega - Passo 1/4*\n\n"
+        "Envie a *Foto 1* (recebedor ou pacote).",
+        parse_mode='Markdown'
+    )
     return PHOTO1
 
 
 async def photo1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo:
-        await update.message.reply_text("Envie uma foto válida para Foto 1.")
+        await update.message.reply_text(
+            "⚠️ *Foto Necessária*\n\n"
+            "Por favor, envie uma foto válida.",
+            parse_mode='Markdown'
+        )
         return PHOTO1
     # Não baixa arquivo. Guarda apenas o file_id do Telegram
     photo = update.message.photo[-1]
     context.user_data["photo1_file_id"] = photo.file_id
-    await update.message.reply_text("Agora envie a Foto 2 do local/porta (obrigatório).")
+    await update.message.reply_text(
+        "📸 *Comprovante de Entrega - Passo 2/4*\n\n"
+        "Envie a *Foto 2* (local, porta ou fachada).",
+        parse_mode='Markdown'
+    )
     return PHOTO2
 
 
 async def photo2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo:
-        await update.message.reply_text("Envie uma foto válida para Foto 2.")
+        await update.message.reply_text(
+            "⚠️ *Foto Necessária*\n\n"
+            "Por favor, envie uma foto válida.",
+            parse_mode='Markdown'
+        )
         return PHOTO2
     # Não baixa arquivo. Guarda apenas o file_id do Telegram
     photo = update.message.photo[-1]
     context.user_data["photo2_file_id"] = photo.file_id
-    await update.message.reply_text("Nome de quem recebeu?")
+    await update.message.reply_text(
+        "✏️ *Comprovante de Entrega - Passo 3/4*\n\n"
+        "Informe o *nome* de quem recebeu o pacote.",
+        parse_mode='Markdown'
+    )
     return NAME
 
 
 async def recv_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     if not text:
-        await update.message.reply_text("Informe um nome válido.")
+        await update.message.reply_text(
+            "❌ *Nome Vazio*\n\n"
+            "Por favor, informe o nome de quem recebeu.",
+            parse_mode='Markdown'
+        )
         return NAME
     context.user_data["receiver_name"] = text
-    await update.message.reply_text("RG de quem recebeu? (Se não tiver, digite 'não informou')")
+    await update.message.reply_text(
+        "🆔 *Comprovante de Entrega - Passo 4/4*\n\n"
+        "Informe o *RG* ou *CPF* de quem recebeu.\n\n"
+        "💡 _Se a pessoa não informou, digite: 'não informou'_",
+        parse_mode='Markdown'
+    )
     return DOC
 
 
 async def recv_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     context.user_data["receiver_document"] = text or "não informou"
-    kb = ReplyKeyboardMarkup([["Pular"]], resize_keyboard=True, one_time_keyboard=True)
-    await update.message.reply_text("Alguma observação? (Opcional)", reply_markup=kb)
+    kb = ReplyKeyboardMarkup([["⏭️ Pular"]], resize_keyboard=True, one_time_keyboard=True)
+    await update.message.reply_text(
+        "📝 *Observações Adicionais*\n\n"
+        "Tem alguma observação sobre esta entrega?\n\n"
+        "💡 _Ou pressione 'Pular' para finalizar_",
+        reply_markup=kb,
+        parse_mode='Markdown'
+    )
     return NOTES
 
 
 async def recv_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
-    if text.lower() == "pular":
+    if text.lower() == "pular" or text.startswith("⏭️"):
         text = None
     context.user_data["notes"] = text
     return await finalize_delivery(update, context)
@@ -508,14 +778,23 @@ async def recv_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pkg_id = context.user_data.get("deliver_package_id")
     if not pkg_id:
-        await update.message.reply_text("Não foi possível identificar o pacote.")
+        await update.message.reply_text(
+            "❌ *Erro Interno*\n\n"
+            "Não foi possível identificar o pacote.\n\n"
+            "Use /entregar novamente.",
+            parse_mode='Markdown'
+        )
         return ConversationHandler.END
 
     db = SessionLocal()
     try:
         package = db.get(Package, int(pkg_id))
         if not package:
-            await update.message.reply_text("Pacote não encontrado.")
+            await update.message.reply_text(
+                "❌ *Pacote Não Encontrado*\n\n"
+                f"O pacote ID `{pkg_id}` não existe.",
+                parse_mode='Markdown'
+            )
             return ConversationHandler.END
 
         driver = get_user_by_tid(db, update.effective_user.id)
@@ -544,10 +823,10 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db2.close()
     if package:
         summary = (
-            f"Entrega concluída\n"
-            f"Pacote: {package.tracking_code}\n"
-            f"Endereço: {package.address or '-'}\n"
-            f"Notas: {context.user_data.get('notes') or '-'}"
+            f"✅ *Entrega Concluída!*\n\n"
+            f"📦 *Pacote:* {package.tracking_code}\n"
+            f"📍 *Endereço:* {package.address or '-'}\n"
+            f"📝 *Observações:* {context.user_data.get('notes') or '-'}"
         )
         await notify_managers(summary, context)
         # Envia as fotos aos managers para consulta/baixa no próprio Telegram
@@ -562,23 +841,43 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for m in managers:
                 if p1:
                     try:
-                        await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1)
+                        await context.bot.send_photo(
+                            chat_id=m.telegram_user_id,
+                            photo=p1,
+                            caption="📸 Foto 1 - Recebedor/Pacote"
+                        )
                     except Exception:
                         pass
                 if p2:
                     try:
-                        await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2)
+                        await context.bot.send_photo(
+                            chat_id=m.telegram_user_id,
+                            photo=p2,
+                            caption="📸 Foto 2 - Local/Porta"
+                        )
                     except Exception:
                         pass
 
-    await update.message.reply_text("Entrega registrado com sucesso!", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(
+        "✅ *Entrega Registrada!*\n\n"
+        f"📦 O pacote foi marcado como entregue.\n"
+        f"👔 Os gerentes foram notificados.\n\n"
+        f"💡 _Continue para a próxima entrega no mapa!_",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode='Markdown'
+    )
     context.user_data.clear()
     return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    await update.message.reply_text("Operação cancelada.", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(
+        "🚫 *Operação Cancelada*\n\n"
+        "Nenhuma alteração foi salva.",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode='Markdown'
+    )
     return ConversationHandler.END
 
 
@@ -966,6 +1265,7 @@ def build_application():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
 
     import_conv = ConversationHandler(
