@@ -2904,14 +2904,22 @@ async def fin_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def _post_init(application):
+    """Executa após inicialização da Application: garante que webhook esteja desabilitado."""
+    try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        print("✅ Webhook removido no startup (drop_pending_updates=True)")
+    except Exception as e:
+        print(f"⚠️ Falha ao remover webhook no startup: {e}")
+
+
 def build_application():
     if not BOT_TOKEN:
         raise RuntimeError("Defina a variável de ambiente BOT_TOKEN")
     init_db()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(_post_init).build()
 
     # Comandos básicos
-    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
@@ -2987,6 +2995,10 @@ def build_application():
         persistent=False,
     )
     app.add_handler(delivery_conv)
+    
+    # Handler genérico de /start (bem-vindo) deve vir APÓS o ConversationHandler acima,
+    # assim o deep link /start deliver_X será tratado pelo fluxo de entrega.
+    app.add_handler(CommandHandler("start", cmd_start))
 
     add_driver_conv = ConversationHandler(
         entry_points=[CommandHandler("cadastrardriver", add_driver_start)],
@@ -3030,7 +3042,7 @@ def build_application():
 def main():
     app = build_application()
     print("Bot iniciado. Pressione Ctrl+C para sair.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
