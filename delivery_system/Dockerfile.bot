@@ -22,4 +22,5 @@ COPY . .
 ENV PYTHONPATH=/app
 
 # APENAS BOT - Telegram Bot Worker
-CMD python bot.py
+# Primeiro limpa webhooks/conexões antigas, depois inicia o bot
+CMD python kill_webhook.py && python bot.py
