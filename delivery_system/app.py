@@ -54,12 +54,24 @@ def create_app() -> FastAPI:
         route = db.query(Route).filter(Route.id == route_id).first()
         if not route:
             raise HTTPException(status_code=404, detail="Route not found")
-        packages = (
-            db.query(Package)
-            .filter(Package.route_id == route_id)
-            .order_by(Package.order_in_route.asc(), Package.id.asc())  # Ordena pela otimização TSP
-            .all()
-        )
+        
+        # Tenta ordenar por order_in_route, mas fallback para id se coluna não existir
+        try:
+            packages = (
+                db.query(Package)
+                .filter(Package.route_id == route_id)
+                .order_by(Package.order_in_route.asc(), Package.id.asc())
+                .all()
+            )
+        except Exception:
+            # Fallback se order_in_route não existir no banco
+            packages = (
+                db.query(Package)
+                .filter(Package.route_id == route_id)
+                .order_by(Package.id.asc())
+                .all()
+            )
+        
         return [PackageOut.model_validate(p) for p in packages]
 
     @app.get("/map/{route_id}/{driver_id}", response_class=HTMLResponse)
