@@ -66,6 +66,8 @@ IMPORT_WAITING_FILE = 10
 IMPORT_ASK_SCRAPING = 11
 IMPORT_SCRAPING_READY = 12
 PHOTO1, PHOTO2, NAME, DOC, NOTES = range(5)
+# Novo fluxo: seleção de modo e fotos em massa
+MODE_SELECT, MASS_PHOTOS = range(50, 52)
 ADD_DRIVER_TID, ADD_DRIVER_NAME = range(10, 12)
 SEND_SELECT_ROUTE, SEND_SELECT_DRIVER = range(20, 22)
 CONFIG_CHANNEL_SELECT_DRIVER, CONFIG_CHANNEL_ENTER_ID = range(23, 25)
@@ -293,14 +295,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 package_id = int(package_id_str)
                 context.user_data["deliver_package_id"] = package_id
                 
-                # Inicia fluxo de fotos direto
+                # Antes de tudo, pergunta o modo
+                keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
                 await update.message.reply_text(
-                    "📸 *Vamos registrar sua entrega!*\n\n"
-                    "Por favor, envie a *primeira foto do pacote entregue*.\n\n"
-                    "_Dica: Tire uma foto clara do pacote com a etiqueta visível._",
-                    parse_mode='Markdown'
+                    "📦 Como será esta entrega?",
+                    reply_markup=keyboard
                 )
-                return PHOTO1
+                return MODE_SELECT
             except (ValueError, IndexError):
                 pass
 
@@ -339,13 +340,12 @@ async def cmd_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 package_id = int(package_id_str)
                 context.user_data["deliver_package_id"] = package_id
+                keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
                 await update.message.reply_text(
-                    "📸 *Vamos registrar sua entrega!*\n\n"
-                    "Por favor, envie a *primeira foto do pacote entregue*.\n\n"
-                    "_Dica: Tire uma foto clara do pacote com a etiqueta visível._",
-                    parse_mode='Markdown'
+                    "📦 Como será esta entrega?",
+                    reply_markup=keyboard
                 )
-                return PHOTO1
+                return MODE_SELECT
             except ValueError:
                 pass
     
@@ -2157,12 +2157,75 @@ async def deliver_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
     context.user_data["deliver_package_id"] = package_id
+    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(
-        "📸 *Comprovante de Entrega - Passo 1/4*\n\n"
-        "Envie a *Foto 1* (recebedor ou pacote).",
-        parse_mode='Markdown'
+        "📦 Como será esta entrega?",
+        reply_markup=keyboard
     )
-    return PHOTO1
+    return MODE_SELECT
+
+
+async def on_mode_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    choice = (update.message.text or "").strip().lower()
+    if choice.startswith("unit"):
+        # Fluxo unitário (original)
+        await update.message.reply_text(
+            "📸 *Comprovante de Entrega - Passo 1/4*\n\n"
+            "Envie a *Foto 1* (recebedor ou pacote).",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode='Markdown'
+        )
+        return PHOTO1
+    elif choice.startswith("em m") or choice == "em massa":
+        # Fluxo em massa: coleta várias fotos de pacotes antes de prosseguir
+        context.user_data["mass_mode"] = True
+        context.user_data["mass_photos"] = []
+        kb = ReplyKeyboardMarkup([["Próximo"]], resize_keyboard=True)
+        await update.message.reply_text(
+            "📸 *Entrega em massa*\n\n"
+            "Envie a foto do pacote que vai ser entregue.\n\n"
+            "Quando terminar, toque em *Próximo* para continuar as provas de entrega.",
+            reply_markup=kb,
+            parse_mode='Markdown'
+        )
+        return MASS_PHOTOS
+    else:
+        await update.message.reply_text("Escolha uma opção válida: Unitário ou Em massa.")
+        return MODE_SELECT
+
+
+async def mass_photos_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        photos = context.user_data.get("mass_photos", [])
+        photos.append(photo.file_id)
+        context.user_data["mass_photos"] = photos
+        kb = ReplyKeyboardMarkup([["Próximo"]], resize_keyboard=True)
+        await update.message.reply_text(
+            f"✅ Foto salva ({len(photos)}). Envie outra foto de pacote ou toque em *Próximo*.",
+            reply_markup=kb,
+            parse_mode='Markdown'
+        )
+        return MASS_PHOTOS
+    # Caso o usuário envie texto enquanto está nesse estado
+    text = (update.message.text or "").strip().lower()
+    if text == "próximo" or text == "proximo":
+        # Prossegue para foto do local (equivalente ao Passo 2)
+        await update.message.reply_text(
+            "📸 *Comprovante de Entrega - Passo 2/5*\n\n"
+            "Agora envie a *foto do local da entrega* (porta, fachada ou recebedor).",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode='Markdown'
+        )
+        return PHOTO2
+    else:
+        kb = ReplyKeyboardMarkup([["Próximo"]], resize_keyboard=True)
+        await update.message.reply_text(
+            "Envie uma foto do pacote ou toque em *Próximo* para continuar.",
+            reply_markup=kb,
+            parse_mode='Markdown'
+        )
+        return MASS_PHOTOS
 
 
 async def photo1(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2269,6 +2332,12 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
         driver = get_user_by_tid(db, update.effective_user.id)
+        # Persistimos ao menos a primeira foto de pacote (unitário ou em massa) + foto do local
+        p1_for_db = context.user_data.get("photo1_file_id")
+        mass_list = context.user_data.get("mass_photos") or []
+        if not p1_for_db and mass_list:
+            p1_for_db = mass_list[0]
+
         proof = DeliveryProof(
             package_id=package.id,
             driver_id=driver.id if driver else None,
@@ -2276,7 +2345,7 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             receiver_document=context.user_data.get("receiver_document"),
             notes=context.user_data.get("notes"),
             # Armazena o file_id do Telegram nos campos existentes
-            photo1_path=context.user_data.get("photo1_file_id"),
+            photo1_path=p1_for_db,
             photo2_path=context.user_data.get("photo2_file_id"),
         )
         db.add(proof)
@@ -2358,58 +2427,74 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=summary
                 )
                 
-                # Envia fotos como grupo media (uma mensagem com ambas)
+                # Envia fotos como grupo/media
                 p1 = context.user_data.get("photo1_file_id")
                 p2 = context.user_data.get("photo2_file_id")
+                mass_list = context.user_data.get("mass_photos") or []
                 
-                # Se tem ambas as fotos, envia como álbum
-                if p1 and p2:
-                    media = [
-                        InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
-                        InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
-                    ]
-                    try:
-                        await context.bot.send_media_group(chat_id=driver.channel_id, media=media)
-                    except Exception:
-                        # Se falhar o álbum, envia fotos separadas
+                # Prioriza enviar fotos em massa (se houver)
+                if mass_list:
+                    # Envia em grupos de até 10
+                    batch = []
+                    for idx, fid in enumerate(mass_list, start=1):
+                        cap = "Pacote"
+                        batch.append(InputMediaPhoto(fid, caption=cap if idx == 1 else None))
+                        if len(batch) == 10:
+                            try:
+                                await context.bot.send_media_group(chat_id=driver.channel_id, media=batch)
+                            except Exception:
+                                for item in batch:
+                                    try:
+                                        await context.bot.send_photo(chat_id=driver.channel_id, photo=item.media, caption=item.caption)
+                                    except Exception:
+                                        pass
+                            batch = []
+                    if batch:
+                        try:
+                            await context.bot.send_media_group(chat_id=driver.channel_id, media=batch)
+                        except Exception:
+                            for item in batch:
+                                try:
+                                    await context.bot.send_photo(chat_id=driver.channel_id, photo=item.media, caption=item.caption)
+                                except Exception:
+                                    pass
+                    # Envia foto do local (se houver)
+                    if p2:
+                        try:
+                            await context.bot.send_photo(chat_id=driver.channel_id, photo=p2, caption="Local/Porta")
+                        except Exception:
+                            pass
+                else:
+                    # Fluxo unitário normal
+                    if p1 and p2:
+                        media = [
+                            InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
+                            InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
+                        ]
+                        try:
+                            await context.bot.send_media_group(chat_id=driver.channel_id, media=media)
+                        except Exception:
+                            if p1:
+                                try:
+                                    await context.bot.send_photo(chat_id=driver.channel_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
+                                except Exception:
+                                    pass
+                            if p2:
+                                try:
+                                    await context.bot.send_photo(chat_id=driver.channel_id, photo=p2, caption="Foto 2 - Local/Porta")
+                                except Exception:
+                                    pass
+                    else:
                         if p1:
                             try:
-                                await context.bot.send_photo(
-                                    chat_id=driver.channel_id,
-                                    photo=p1,
-                                    caption="Foto 1 - Recebedor/Pacote"
-                                )
+                                await context.bot.send_photo(chat_id=driver.channel_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
                             except Exception:
                                 pass
                         if p2:
                             try:
-                                await context.bot.send_photo(
-                                    chat_id=driver.channel_id,
-                                    photo=p2,
-                                    caption="Foto 2 - Local/Porta"
-                                )
+                                await context.bot.send_photo(chat_id=driver.channel_id, photo=p2, caption="Foto 2 - Local/Porta")
                             except Exception:
                                 pass
-                else:
-                    # Se tem apenas uma foto
-                    if p1:
-                        try:
-                            await context.bot.send_photo(
-                                chat_id=driver.channel_id,
-                                photo=p1,
-                                caption="Foto 1 - Recebedor/Pacote"
-                            )
-                        except Exception:
-                            pass
-                    if p2:
-                        try:
-                            await context.bot.send_photo(
-                                chat_id=driver.channel_id,
-                                photo=p2,
-                                caption="Foto 2 - Local/Porta"
-                            )
-                        except Exception:
-                            pass
                 
                 # Envia progresso após as fotos
                 await context.bot.send_message(
@@ -2446,6 +2531,7 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             p1 = context.user_data.get("photo1_file_id")
             p2 = context.user_data.get("photo2_file_id")
+            mass_list = context.user_data.get("mass_photos") or []
             if p1 or p2:
                 dbm = SessionLocal()
                 try:
@@ -2453,54 +2539,68 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 finally:
                     dbm.close()
                 for m in managers:
-                    # Se tem ambas as fotos, envia como álbum
-                    if p1 and p2:
-                        media = [
-                            InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
-                            InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
-                        ]
-                        try:
-                            await context.bot.send_media_group(chat_id=m.telegram_user_id, media=media)
-                        except Exception:
-                            # Se falhar, envia separadas
+                    if mass_list:
+                        # Envia mass photos em lotes
+                        batch = []
+                        for idx, fid in enumerate(mass_list, start=1):
+                            cap = "Pacote"
+                            batch.append(InputMediaPhoto(fid, caption=cap if idx == 1 else None))
+                            if len(batch) == 10:
+                                try:
+                                    await context.bot.send_media_group(chat_id=m.telegram_user_id, media=batch)
+                                except Exception:
+                                    for item in batch:
+                                        try:
+                                            await context.bot.send_photo(chat_id=m.telegram_user_id, photo=item.media, caption=item.caption)
+                                        except Exception:
+                                            pass
+                                batch = []
+                        if batch:
+                            try:
+                                await context.bot.send_media_group(chat_id=m.telegram_user_id, media=batch)
+                            except Exception:
+                                for item in batch:
+                                    try:
+                                        await context.bot.send_photo(chat_id=m.telegram_user_id, photo=item.media, caption=item.caption)
+                                    except Exception:
+                                        pass
+                        if p2:
+                            try:
+                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Local/Porta")
+                            except Exception:
+                                pass
+                    else:
+                        # Fluxo unitário
+                        if p1 and p2:
+                            media = [
+                                InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
+                                InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
+                            ]
+                            try:
+                                await context.bot.send_media_group(chat_id=m.telegram_user_id, media=media)
+                            except Exception:
+                                # Se falhar, envia separadas
+                                if p1:
+                                    try:
+                                        await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
+                                    except Exception:
+                                        pass
+                                if p2:
+                                    try:
+                                        await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Foto 2 - Local/Porta")
+                                    except Exception:
+                                        pass
+                        else:
                             if p1:
                                 try:
-                                    await context.bot.send_photo(
-                                        chat_id=m.telegram_user_id,
-                                        photo=p1,
-                                        caption="Foto 1 - Recebedor/Pacote"
-                                    )
+                                    await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
                                 except Exception:
                                     pass
                             if p2:
                                 try:
-                                    await context.bot.send_photo(
-                                        chat_id=m.telegram_user_id,
-                                        photo=p2,
-                                        caption="Foto 2 - Local/Porta"
-                                    )
+                                    await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Foto 2 - Local/Porta")
                                 except Exception:
                                     pass
-                    else:
-                        # Se tem apenas uma foto
-                        if p1:
-                            try:
-                                await context.bot.send_photo(
-                                    chat_id=m.telegram_user_id,
-                                    photo=p1,
-                                    caption="Foto 1 - Recebedor/Pacote"
-                                )
-                            except Exception:
-                                pass
-                        if p2:
-                            try:
-                                await context.bot.send_photo(
-                                    chat_id=m.telegram_user_id,
-                                    photo=p2,
-                                    caption="Foto 2 - Local/Porta"
-                                )
-                            except Exception:
-                                pass
                 
                 # Envia progresso após as fotos para os managers
                 dbm2 = SessionLocal()
@@ -3022,6 +3122,11 @@ def build_application():
             CommandHandler("start", cmd_start),      # Deep link tradicional: /start deliver_X
         ],
         states={
+            MODE_SELECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, on_mode_select)],
+            MASS_PHOTOS: [
+                MessageHandler(filters.PHOTO, mass_photos_add),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, mass_photos_add),
+            ],
             PHOTO1: [MessageHandler(filters.PHOTO, photo1)],
             PHOTO2: [MessageHandler(filters.PHOTO, photo2)],
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_name)],
