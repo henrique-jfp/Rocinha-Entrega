@@ -1,11 +1,13 @@
+[providers]
+python = ["3.12"]
+
 [phases.setup]
 nixPkgs = ["python312"]
 
 [phases.install]
 cmds = [
-  "cd delivery_system",
-  "python3 -m pip install --upgrade pip",
-  "python3 -m pip install -r requirements.txt"
+  "cd delivery_system && python3 -m pip install --upgrade pip",
+  "cd delivery_system && python3 -m pip install -r requirements.txt"
 ]
 
 [start]
