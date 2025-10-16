@@ -108,12 +108,12 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          font-weight: 800;
+          font-weight: 900;
           font-size: 18px;
           box-shadow: 0 4px 12px ${shadowColor}, 0 0 0 4px white, 0 0 0 6px ${bgColor}33;
           border: 3px solid #fff;
         ">
-          📦
+          ${number}
         </div>
         <div style="
           position: absolute;
@@ -132,7 +132,7 @@
           padding: 0 6px;
           border: 3px solid white;
           box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        ">${number}</div>
+        ">${isCluster ? '📦' : ''}</div>
       </div>`;
       
       return L.divIcon({
@@ -275,7 +275,9 @@
             🧭 Navegar para este Endereço
           </a>
           ${groupLink ? `
-          <a class="popup-btn deliver" href="${groupLink}" target="_blank" rel="noopener" style="width: 100%; text-align: center; background: #10b981; color: white;">
+          <a class="popup-btn deliver" href="${groupLink}" target="_blank" rel="noopener" style="
+            width: 100%; text-align: center; background: #10b981; color: white; font-size: 14px; padding: 10px; border: 1px solid #059669; border-radius: 10px; font-weight: 800;
+          ">
             ✓ Entregar todos deste endereço
           </a>` : ''}
         </div>
@@ -286,7 +288,7 @@
   // Adiciona marcador individual
   function addPackageMarker(pkg, index){
     if(!(pkg.latitude && pkg.longitude)) return null;
-    const icon = createNumberedIcon(index + 1, pkg.status, false);
+  const icon = createNumberedIcon(index + 1, pkg.status, false);
     const marker = L.marker([pkg.latitude, pkg.longitude], { icon }).addTo(markersLayer);
     marker.bindPopup(createPopupHtml(pkg));
     marker.pkg = pkg;
@@ -304,7 +306,7 @@
     if(statuses.every(s => s === 'delivered')) dominantStatus = 'delivered';
     else if(statuses.every(s => s === 'failed')) dominantStatus = 'failed';
     
-    const icon = createNumberedIcon(count, dominantStatus, true);
+  const icon = createNumberedIcon(clusterIndex + 1, dominantStatus, true);
     const marker = L.marker([cluster.lat, cluster.lng], { icon }).addTo(markersLayer);
     marker.bindPopup(createClusterPopupHtml(packages), { maxWidth: 340 });
     marker.cluster = cluster;
@@ -323,7 +325,7 @@
 
     const pinNum = document.createElement('div');
     pinNum.className = 'pin-number';
-    pinNum.textContent = index + 1;
+  pinNum.textContent = index + 1;
 
     const info = document.createElement('div');
     info.className = 'pkg-info';
@@ -438,26 +440,25 @@
       // Agrupa pacotes próximos
       const clusters = clusterPackages(data);
       console.log('🗂️ Clusters criados:', clusters.length);
-      let displayIndex = 0;
+  let displayIndex = 0; // número da parada (cluster)
 
       clusters.forEach((cluster) => {
         if(cluster.packages.length === 1){
-          // Pacote individual
+          // Parada com 1 pacote
           const pkg = cluster.packages[0];
           const marker = addPackageMarker(pkg, displayIndex);
           if(marker) group.push(marker.getLatLng());
           list.appendChild(createListItem(pkg, marker, displayIndex));
           displayIndex++;
         } else {
-          // Cluster com múltiplos pacotes
+          // Parada com múltiplos pacotes no mesmo endereço
           const marker = addClusterMarker(cluster, displayIndex);
           if(marker) group.push(marker.getLatLng());
-          
-          // Adiciona cada pacote do cluster na lista
+          // Todos os itens listados recebem o mesmo número de parada
           cluster.packages.forEach((pkg) => {
             list.appendChild(createListItem(pkg, marker, displayIndex));
-            displayIndex++;
           });
+          displayIndex++;
         }
         
         // Conta estatísticas e detecta mudanças
