@@ -285,7 +285,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = register_manager_if_first(u.id, u.full_name)
 
     # Verifica se veio do mapa (deep link de entrega)
+    # IMPORTANTE: context.args só funciona quando o comando vem de mensagem direta.
+    # Quando o usuário clica no botão START do Telegram (após abrir t.me/bot?start=X),
+    # o parâmetro vem na mensagem de texto /start X (não em args).
     args = context.args or []
+    if not args and update.message and update.message.text:
+        # Fallback: extrai parâmetro da mensagem de texto "/start <param>"
+        parts = update.message.text.strip().split(maxsplit=1)
+        if len(parts) == 2:
+            args = [parts[1]]
+    
     if args and len(args) >= 1:
         arg = args[0]
         # Novo formato curto: deliverg_<token>
@@ -356,6 +365,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /iniciar - Inicia entrega via deep link do mapa"""
     args = context.args or []
+    if not args and update.message and update.message.text:
+        # Fallback: extrai parâmetro da mensagem de texto "/iniciar <param>"
+        parts = update.message.text.strip().split(maxsplit=1)
+        if len(parts) == 2:
+            args = [parts[1]]
+    
     if args and len(args) == 1:
         # Aceita tanto "iniciar_deliver_X" quanto "deliver_X"
         arg = args[0]
