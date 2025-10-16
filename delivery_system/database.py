@@ -213,6 +213,16 @@ class AIReport(Base):
     )
 
 
+class LinkToken(Base):
+    """Tokens curtos para deep links (ex.: grupos de pacotes)."""
+    __tablename__ = "link_token"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    type: Mapped[str] = mapped_column(String(32), nullable=False)  # ex: 'deliver_group'
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)       # payload (ex.: {"ids":[...]})
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
 def init_db() -> None:
     """Create all tables if not exist."""
     Base.metadata.create_all(bind=engine)

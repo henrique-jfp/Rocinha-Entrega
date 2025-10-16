@@ -29,7 +29,7 @@ from telegram.error import TelegramError
 
 from database import (
     SessionLocal, init_db, User, Route, Package, DeliveryProof,
-    Expense, Income, Mileage, AIReport
+    Expense, Income, Mileage, AIReport, LinkToken
 )
 
 
@@ -288,6 +288,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
     if args and len(args) >= 1:
         arg = args[0]
+        # Novo formato curto: deliverg_<token>
+        if arg.startswith("deliverg_"):
+            token = arg.split("deliverg_", 1)[1]
+            db = SessionLocal()
+            try:
+                rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
+                if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
+                    context.user_data["deliver_package_ids"] = list(map(int, rec.data["ids"]))
+                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
+                    await update.message.reply_text(
+                        "📦 Como será esta entrega?",
+                        reply_markup=keyboard
+                    )
+                    return MODE_SELECT
+            finally:
+                db.close()
         if arg.startswith("deliver_group_"):
             try:
                 ids_str = arg.split("deliver_group_", 1)[1]
@@ -343,6 +359,21 @@ async def cmd_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if args and len(args) == 1:
         # Aceita tanto "iniciar_deliver_X" quanto "deliver_X"
         arg = args[0]
+        if arg.startswith("deliverg_"):
+            token = arg.split("deliverg_", 1)[1]
+            db = SessionLocal()
+            try:
+                rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
+                if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
+                    context.user_data["deliver_package_ids"] = list(map(int, rec.data["ids"]))
+                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
+                    await update.message.reply_text(
+                        "📦 Como será esta entrega?",
+                        reply_markup=keyboard
+                    )
+                    return MODE_SELECT
+            finally:
+                db.close()
         if arg.startswith("deliver_group_"):
             try:
                 ids_str = arg.split("deliver_group_", 1)[1]

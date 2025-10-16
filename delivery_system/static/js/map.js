@@ -248,11 +248,14 @@
       `;
     }).join('');
 
-    // Link para entregar todos os pacotes deste endereço (ids concatenados)
-    const allIds = packages.filter(p => p.status === 'pending').map(p => p.id);
-    const groupLink = allIds.length > 0
-      ? `https://t.me/${botUsername}?start=deliver_group_${allIds.slice(0, 30).join('_')}`
-      : null;
+    // Link para entregar todos com token curto (evita limite de 64 chars do Telegram)
+    const pendingIds = packages.filter(p => p.status === 'pending').map(p => p.id);
+    let groupLink = null;
+    if (pendingIds.length > 0) {
+      // criamos o link sob demanda via token (evita expor IDs longos)
+      // usamos um placeholder e substituímos após gerar o token
+      groupLink = `javascript:void(0)`;
+    }
     
     return `
       <div style="min-width: 280px; max-width: 320px;">
@@ -274,8 +277,8 @@
           <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="width: 100%; text-align: center;">
             🧭 Navegar para este Endereço
           </a>
-          ${groupLink ? `
-          <a class="popup-btn deliver" href="${groupLink}" target="_blank" rel="noopener" style="
+          ${pendingIds.length > 0 ? `
+          <a class="popup-btn deliver deliver-all" href="#" data-ids="${pendingIds.join(',')}" style="
             width: 100%; text-align: center; background: #10b981; color: white; font-size: 14px; padding: 10px; border: 1px solid #059669; border-radius: 10px; font-weight: 800;
           ">
             ✓ Entregar todos deste endereço
@@ -564,6 +567,32 @@
 
   // Refresh every 30 seconds (atualização rápida para feedback em tempo real)
   setInterval(loadPackages, 30_000);
+
+  // Delegação de evento: clicar em "Entregar todos deste endereço"
+  document.addEventListener('click', async (e) => {
+    const a = e.target.closest('a.deliver-all');
+    if (!a) return;
+    e.preventDefault();
+    try {
+      const ids = (a.getAttribute('data-ids') || '').split(',').map(x => Number(x)).filter(Boolean);
+      if (!ids.length) return;
+      // Cria token curto no backend
+      const res = await fetch(`${baseUrl}/group-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ package_ids: ids })
+      });
+      if (!res.ok) throw new Error('Falha ao gerar token');
+      const { token } = await res.json();
+      // Monta deep link curto
+      const link = `https://t.me/${botUsername}?start=deliverg_${encodeURIComponent(token)}`;
+      // Abre o Telegram
+      window.open(link, '_blank', 'noopener');
+    } catch (err) {
+      console.error('Erro ao criar token de grupo:', err);
+      alert('Não foi possível abrir o Telegram. Tente novamente.');
+    }
+  });
 
   // ==================== BUSCA E TOGGLE ====================
   

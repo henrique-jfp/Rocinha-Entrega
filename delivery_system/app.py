@@ -8,7 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict
 
-from database import SessionLocal, get_db_session, Package, Route, init_db
+from database import SessionLocal, get_db_session, Package, Route, init_db, LinkToken
+import secrets
 
 
 class PackageOut(BaseModel):
@@ -128,6 +129,24 @@ def create_app() -> FastAPI:
         if not data:
             raise HTTPException(status_code=404, detail="No location yet")
         return data
+
+    class GroupTokenIn(BaseModel):
+        package_ids: List[int]
+
+    class GroupTokenOut(BaseModel):
+        token: str
+
+    @app.post("/group-token", response_model=GroupTokenOut)
+    def create_group_token(body: GroupTokenIn, db=Depends(get_db_session)):
+        ids = [int(i) for i in body.package_ids if isinstance(i, (int, str))]
+        if not ids:
+            raise HTTPException(status_code=400, detail="package_ids vazio")
+        # Limite de payload, armazenado no DB, token curto
+        token = secrets.token_urlsafe(10)  # ~14 chars
+        rec = LinkToken(token=token, type="deliver_group", data={"ids": ids})
+        db.add(rec)
+        # commit via dependency get_db_session
+        return {"token": token}
 
     return app
 
