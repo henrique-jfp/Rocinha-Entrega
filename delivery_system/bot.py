@@ -2517,14 +2517,39 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception:
                         pass
 
-    await update.message.reply_text(
+    # Monta link do mapa interativo para continuar a rota
+    map_url = None
+    try:
+        if route_id is not None and driver and driver.id:
+            map_url = f"{BASE_URL}/map/{route_id}/{driver.id}"
+    except Exception:
+        map_url = None
+
+    final_msg = (
         "✅ *Entrega Registrada!*\n\n"
         f"📦 O pacote foi marcado como entregue.\n"
         f"👔 Os gerentes foram notificados.\n\n"
-        f"💡 _Continue para a próxima entrega no mapa!_",
+        + (f"🗺️ Abra o mapa para a próxima entrega:\n{map_url}\n\n" if map_url else "")
+        + "💡 _Continue para a próxima entrega no mapa!_"
+    )
+    await update.message.reply_text(
+        final_msg,
         reply_markup=ReplyKeyboardRemove(),
         parse_mode='Markdown'
     )
+    
+    # Botão rápido (opcional) para abrir o mapa
+    if map_url:
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="🗺️ Abrir mapa interativo",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Abrir mapa", url=map_url)]
+                ])
+            )
+        except Exception:
+            pass
     context.user_data.clear()
     return ConversationHandler.END
 
