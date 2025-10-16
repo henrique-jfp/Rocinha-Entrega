@@ -5,50 +5,13 @@
   const botUsername = body.getAttribute('data-bot-username') || 'SEU_BOT_USERNAME';
   const baseUrl = body.getAttribute('data-base-url') || '';
 
-  // Initialize map
+  // Initialize map with detailed CARTO Voyager layer (best for Rocinha)
   const map = L.map('map', { zoomControl: true });
   
-  // Camadas de mapas com melhor detalhamento
-  const baseLayers = {
-    "🗺️ Padrão": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap'
-    }),
-    
-    "🛰️ Satélite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
-      attribution: '© Esri'
-    }),
-    
-    "🏙️ Detalhado": L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-      attribution: '© CARTO'
-    }),
-    
-    "🌃 Escuro": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-      attribution: '© CARTO'
-    })
-  };
-  
-  // Camada híbrida (satélite + labels)
-  const satelliteLayer = baseLayers["🛰️ Satélite"];
-  const labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+  // Usa apenas camada detalhada CARTO Voyager - melhor visualização para Rocinha
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     maxZoom: 19,
-    attribution: '© CARTO'
-  });
-  
-  // Grupo para satélite + labels
-  const hybridLayer = L.layerGroup([satelliteLayer, labelsLayer]);
-  baseLayers["📍 Híbrido"] = hybridLayer;
-  
-  // Adiciona camada padrão detalhada (melhor para Rocinha)
-  baseLayers["🏙️ Detalhado"].addTo(map);
-  
-  // Adiciona controle de camadas no canto superior direito
-  L.control.layers(baseLayers, null, {
-    position: 'topright',
-    collapsed: false
+    attribution: '© OpenStreetMap, © CARTO'
   }).addTo(map);
 
   map.setView([-22.9, -43.2], 12);

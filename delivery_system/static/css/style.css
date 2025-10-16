@@ -26,62 +26,6 @@ body { display: flex; flex-direction: column; }
 #map-container { flex: 1; position: relative; min-height: 300px; }
 #map { position: absolute; inset: 0; }
 
-/* Customização do controle de camadas Leaflet */
-.leaflet-control-layers {
-  background: #fff !important;
-  border-radius: 12px !important;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
-  border: none !important;
-  padding: 12px !important;
-}
-
-.leaflet-control-layers-expanded {
-  padding: 16px !important;
-  min-width: 180px !important;
-}
-
-.leaflet-control-layers-toggle {
-  background-image: none !important;
-  width: 40px !important;
-  height: 40px !important;
-  border-radius: 10px !important;
-  background: #fff !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-}
-
-.leaflet-control-layers-toggle::before {
-  content: "🗺️";
-  font-size: 20px;
-}
-
-.leaflet-control-layers label {
-  display: flex !important;
-  align-items: center !important;
-  padding: 8px 4px !important;
-  cursor: pointer !important;
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  color: #374151 !important;
-  border-radius: 6px !important;
-  transition: background 0.2s !important;
-}
-
-.leaflet-control-layers label:hover {
-  background: #f3f4f6 !important;
-}
-
-.leaflet-control-layers-base label span {
-  margin-left: 8px !important;
-}
-
-.leaflet-control-layers input[type="radio"] {
-  margin-right: 8px !important;
-  cursor: pointer !important;
-  accent-color: #6366f1 !important;
-}
-
 /* Zoom controls mais bonitos */
 .leaflet-control-zoom {
   border: none !important;
