@@ -281,22 +281,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     user = register_manager_if_first(u.id, u.full_name)
 
-    # Verifica se há deep link (ex: /start iniciar_deliver_123)
-    args = context.args or []
-    if args and len(args) >= 1:
-        arg = args[0]
-        if arg.startswith("iniciar_deliver_") or arg.startswith("deliver_"):
-            # Se tem um deep link de entrega, redireciona para cmd_iniciar
-            await update.message.reply_text(
-                f"👋 Olá, *{u.first_name}*!\n\n"
-                f"Bem-vindo! Iniciando seu registro de entrega...",
-                parse_mode='Markdown'
-            )
-            # Passa o argumento para cmd_iniciar
-            context.args = args
-            return await cmd_iniciar(update, context)
-
-    # Mensagem de boas-vindas normal (sem deep link)
+    # Mensagem de boas-vindas personalizada
     if user.role == "manager":
         await update.message.reply_text(
             f"👋 Olá, *{u.first_name}*!\n\n"
