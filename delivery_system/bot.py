@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
+from math import radians, sin, cos, sqrt, asin
 
 import pandas as pd
 import google.generativeai as genai
@@ -78,11 +79,19 @@ FIN_EXPENSES, FIN_NOTES = range(40, 42)
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calcula distância Haversine entre dois pontos (em km)."""
     R = 6371  # Raio da Terra em km
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
-    c = 2 * np.arcsin(np.sqrt(a))
+    
+    # Converter para radianos
+    lat1_rad = radians(lat1)
+    lon1_rad = radians(lon1)
+    lat2_rad = radians(lat2)
+    lon2_rad = radians(lon2)
+    
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    a = sin(dlat/2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    
     return R * c
 
 
