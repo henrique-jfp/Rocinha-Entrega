@@ -474,14 +474,14 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         now = datetime.now()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         
-        # Dados de entregas
-        total_packages = db.query(Package).filter(Package.created_at >= month_start).count()
-        delivered_packages = db.query(Package).filter(
-            Package.created_at >= month_start,
+        # Dados de entregas (packages não tem created_at, usar route.created_at)
+        total_packages = db.query(Package).join(Route).filter(Route.created_at >= month_start).count()
+        delivered_packages = db.query(Package).join(Route).filter(
+            Route.created_at >= month_start,
             Package.status == "delivered"
         ).count()
-        failed_packages = db.query(Package).filter(
-            Package.created_at >= month_start,
+        failed_packages = db.query(Package).join(Route).filter(
+            Route.created_at >= month_start,
             Package.status == "failed"
         ).count()
         
@@ -924,17 +924,17 @@ async def cmd_configurarcasa(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Motorista ou Manager configura endereço de casa (ponto de partida para rotas)"""
     await update.message.reply_text(
         "📍 *Configurar Endereço de Casa*\n\n"
-        "Para otimizar suas rotas, preciso saber seu ponto de partida\\!\n\n"
+        "Para otimizar suas rotas, preciso saber seu ponto de partida!\n\n"
         "📲 *Envie sua localização:*\n"
-        "1\\. Clique no 📎 \\(anexo\\)\n"
-        "2\\. Escolha *'Localização'*\n"
-        "3\\. Envie sua *localização atual* ou *procure seu endereço*\n\n"
+        "1. Clique no 📎 (anexo)\n"
+        "2. Escolha *'Localização'*\n"
+        "3. Envie sua *localização atual* ou *procure seu endereço*\n\n"
         "💡 *Isso permite:*\n"
         "• Rotas otimizadas a partir da SUA casa\n"
         "• Menos km rodados = economia de combustível\n"
         "• Sequência de entregas mais eficiente\n\n"
-        "Ou envie *CANCELAR* para desistir\\.",
-        parse_mode='MarkdownV2'
+        "Ou envie *CANCELAR* para desistir.",
+        parse_mode='Markdown'
     )
     return CONFIG_HOME_LOCATION
 
