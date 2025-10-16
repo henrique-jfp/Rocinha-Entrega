@@ -13,6 +13,7 @@ from telegram import (
     ReplyKeyboardRemove,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
 )
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -2276,52 +2277,110 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         notes = context.user_data.get('notes') or '-'
         driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
         
-        # Mensagem formatada para o canal
+        # Calcula progresso da rota
+        db_progress = SessionLocal()
+        try:
+            route = package.route
+            total_packages = db_progress.query(Package).filter(Package.route_id == route.id).count()
+            delivered_packages = db_progress.query(Package).filter(
+                Package.route_id == route.id,
+                Package.status == "delivered"
+            ).count()
+            remaining_packages = total_packages - delivered_packages
+            route_name = route.name or f"Rota {route.id}"
+        finally:
+            db_progress.close()
+        
+        # Mensagem formatada para o canal (sem asteriscos, mais limpo)
         summary = (
-            f"✅ *Entrega Concluída!*\n\n"
-            f"� *Motorista:* {driver_name}\n"
-            f"�📦 *Pacote:* {package.tracking_code}\n"
-            f"📍 *Endereço:* {package.address or '-'}\n"
-            f"🏘️ *Bairro:* {package.neighborhood or '-'}\n"
-            f"👥 *Recebedor:* {receiver_name}\n"
-            f"🆔 *Documento:* {receiver_doc}\n"
-            f"📝 *Observações:* {notes}\n"
-            f"🕐 *Data/Hora:* {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+            f"✅ Entrega Concluída!\n\n"
+            f"Motorista: {driver_name}\n"
+            f"Pacote: {package.tracking_code}\n"
+            f"Endereço: {package.address or '-'}\n"
+            f"Bairro: {package.neighborhood or '-'}\n"
+            f"Recebedor: {receiver_name}\n"
+            f"Documento: {receiver_doc}\n"
+            f"Observações: {notes}\n"
+            f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+        )
+        
+        # Mensagem de progresso
+        progress_message = (
+            f"📊 Status da Rota: {route_name}\n\n"
+            f"✅ Entregues: {delivered_packages}\n"
+            f"⏳ Pendentes: {remaining_packages}\n"
+            f"📦 Total: {total_packages}\n\n"
+            f"Progresso: {(delivered_packages/total_packages*100 if total_packages > 0 else 0):.0f}%"
         )
         
         # Verifica se motorista tem canal configurado
         if driver.channel_id:
             # Envia para o CANAL
             try:
+                # Envia informações
                 await context.bot.send_message(
                     chat_id=driver.channel_id,
-                    text=summary,
-                    parse_mode='Markdown'
+                    text=summary
                 )
                 
-                # Envia fotos para o canal
+                # Envia fotos como grupo media (uma mensagem com ambas)
                 p1 = context.user_data.get("photo1_file_id")
                 p2 = context.user_data.get("photo2_file_id")
                 
-                if p1:
+                # Se tem ambas as fotos, envia como álbum
+                if p1 and p2:
+                    media = [
+                        InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
+                        InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
+                    ]
                     try:
-                        await context.bot.send_photo(
-                            chat_id=driver.channel_id,
-                            photo=p1,
-                            caption="📸 Foto 1 - Recebedor/Pacote"
-                        )
+                        await context.bot.send_media_group(chat_id=driver.channel_id, media=media)
                     except Exception:
-                        pass
+                        # Se falhar o álbum, envia fotos separadas
+                        if p1:
+                            try:
+                                await context.bot.send_photo(
+                                    chat_id=driver.channel_id,
+                                    photo=p1,
+                                    caption="Foto 1 - Recebedor/Pacote"
+                                )
+                            except Exception:
+                                pass
+                        if p2:
+                            try:
+                                await context.bot.send_photo(
+                                    chat_id=driver.channel_id,
+                                    photo=p2,
+                                    caption="Foto 2 - Local/Porta"
+                                )
+                            except Exception:
+                                pass
+                else:
+                    # Se tem apenas uma foto
+                    if p1:
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=driver.channel_id,
+                                photo=p1,
+                                caption="Foto 1 - Recebedor/Pacote"
+                            )
+                        except Exception:
+                            pass
+                    if p2:
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=driver.channel_id,
+                                photo=p2,
+                                caption="Foto 2 - Local/Porta"
+                            )
+                        except Exception:
+                            pass
                 
-                if p2:
-                    try:
-                        await context.bot.send_photo(
-                            chat_id=driver.channel_id,
-                            photo=p2,
-                            caption="📸 Foto 2 - Local/Porta"
-                        )
-                    except Exception:
-                        pass
+                # Envia progresso após as fotos
+                await context.bot.send_message(
+                    chat_id=driver.channel_id,
+                    text=progress_message
+                )
                 
             except Exception as e:
                 # Se falhar, envia para os managers como fallback
@@ -2338,12 +2397,12 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     for m in managers:
                         if p1:
                             try:
-                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="📸 Foto 1")
+                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="Foto 1")
                             except Exception:
                                 pass
                         if p2:
                             try:
-                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="📸 Foto 2")
+                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Foto 2")
                             except Exception:
                                 pass
         else:
@@ -2359,24 +2418,69 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 finally:
                     dbm.close()
                 for m in managers:
-                    if p1:
+                    # Se tem ambas as fotos, envia como álbum
+                    if p1 and p2:
+                        media = [
+                            InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
+                            InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
+                        ]
                         try:
-                            await context.bot.send_photo(
-                                chat_id=m.telegram_user_id,
-                                photo=p1,
-                                caption="📸 Foto 1 - Recebedor/Pacote"
-                            )
+                            await context.bot.send_media_group(chat_id=m.telegram_user_id, media=media)
                         except Exception:
-                            pass
-                    if p2:
-                        try:
-                            await context.bot.send_photo(
-                                chat_id=m.telegram_user_id,
-                                photo=p2,
-                                caption="📸 Foto 2 - Local/Porta"
-                            )
-                        except Exception:
-                            pass
+                            # Se falhar, envia separadas
+                            if p1:
+                                try:
+                                    await context.bot.send_photo(
+                                        chat_id=m.telegram_user_id,
+                                        photo=p1,
+                                        caption="Foto 1 - Recebedor/Pacote"
+                                    )
+                                except Exception:
+                                    pass
+                            if p2:
+                                try:
+                                    await context.bot.send_photo(
+                                        chat_id=m.telegram_user_id,
+                                        photo=p2,
+                                        caption="Foto 2 - Local/Porta"
+                                    )
+                                except Exception:
+                                    pass
+                    else:
+                        # Se tem apenas uma foto
+                        if p1:
+                            try:
+                                await context.bot.send_photo(
+                                    chat_id=m.telegram_user_id,
+                                    photo=p1,
+                                    caption="Foto 1 - Recebedor/Pacote"
+                                )
+                            except Exception:
+                                pass
+                        if p2:
+                            try:
+                                await context.bot.send_photo(
+                                    chat_id=m.telegram_user_id,
+                                    photo=p2,
+                                    caption="Foto 2 - Local/Porta"
+                                )
+                            except Exception:
+                                pass
+                
+                # Envia progresso após as fotos para os managers
+                dbm2 = SessionLocal()
+                try:
+                    managers = dbm2.query(User).filter(User.role == "manager").all()
+                finally:
+                    dbm2.close()
+                for m in managers:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=m.telegram_user_id,
+                            text=progress_message
+                        )
+                    except Exception:
+                        pass
 
     await update.message.reply_text(
         "✅ *Entrega Registrada!*\n\n"
