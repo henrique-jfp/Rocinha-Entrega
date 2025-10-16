@@ -2359,7 +2359,10 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p1_for_db = mass_list[0]
 
         route_id = None
-        delivered_packages_objs = []
+        delivered_ids: list[int] = []
+        delivered_codes: list[str] = []
+        primary_addr: str | None = None
+        primary_neighborhood: str | None = None
         receiver_name_val = context.user_data.get("receiver_name")
         receiver_document_val = context.user_data.get("receiver_document")
         notes_val = context.user_data.get("notes")
@@ -2374,6 +2377,8 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return ConversationHandler.END
             route_id = packages[0].route_id if packages else None
+            primary_addr = packages[0].address
+            primary_neighborhood = packages[0].neighborhood
             for p in packages:
                 proof = DeliveryProof(
                     package_id=p.id,
@@ -2386,9 +2391,12 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 db.add(proof)
                 p.status = "delivered"
-                delivered_packages_objs.append(p)
+                delivered_ids.append(p.id)
+                try:
+                    delivered_codes.append(p.tracking_code)
+                except Exception:
+                    pass
             db.commit()
-            package = delivered_packages_objs[0]
         else:
             # Entrega unitária
             package = db.get(Package, int(pkg_id))
@@ -2400,6 +2408,8 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return ConversationHandler.END
             route_id = package.route_id
+            primary_addr = package.address
+            primary_neighborhood = package.neighborhood
             proof = DeliveryProof(
                 package_id=package.id,
                 driver_id=driver.id if driver else None,
@@ -2411,7 +2421,11 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             db.add(proof)
             package.status = "delivered"
-            delivered_packages_objs = [package]
+            delivered_ids = [package.id]
+            try:
+                delivered_codes = [package.tracking_code]
+            except Exception:
+                delivered_codes = []
             db.commit()
 
     finally:
@@ -2420,11 +2434,9 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Notificar managers OU canal configurado do motorista
     try:
         db2 = SessionLocal()
-        # Recarrega dados do pacote principal e driver
-        package = db2.get(Package, int(delivered_packages_objs[0].id))
+        # Recarrega driver e, se necessário, a rota
         driver = get_user_by_tid(db2, update.effective_user.id)
         # Captura route_id e nome da rota
-        route_id = route_id if route_id is not None else (package.route_id if package else None)
         route_name = None
         if route_id is not None:
             try:
@@ -2435,7 +2447,7 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db2.close()
     
-    if package and driver:
+    if driver:
         receiver_name = context.user_data.get('receiver_name') or '-'
         receiver_doc = context.user_data.get('receiver_document') or '-'
         notes = context.user_data.get('notes') or '-'
@@ -2461,14 +2473,14 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Mensagem formatada para o canal (sem asteriscos, mais limpo)
         # Monta resumo: suporta múltiplos pacotes
         if pkg_ids:
-            codes = [p.tracking_code for p in delivered_packages_objs if getattr(p, 'tracking_code', None)]
+            codes = [c for c in delivered_codes if c]
             codes_preview = ", ".join(codes[:6]) + (f" +{len(codes)-6}" if len(codes) > 6 else "")
             summary = (
                 f"✅ Entregas Concluídas!\n\n"
                 f"Motorista: {driver_name}\n"
-                f"Pacotes: {len(delivered_packages_objs)} ({codes_preview})\n"
-                f"Endereço: {package.address or '-'}\n"
-                f"Bairro: {package.neighborhood or '-'}\n"
+                f"Pacotes: {len(delivered_ids)} ({codes_preview})\n"
+                f"Endereço: {primary_addr or '-'}\n"
+                f"Bairro: {primary_neighborhood or '-'}\n"
                 f"Recebedor: {receiver_name}\n"
                 f"Documento: {receiver_doc}\n"
                 f"Observações: {notes}\n"
@@ -2478,9 +2490,9 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             summary = (
                 f"✅ Entrega Concluída!\n\n"
                 f"Motorista: {driver_name}\n"
-                f"Pacote: {package.tracking_code}\n"
-                f"Endereço: {package.address or '-'}\n"
-                f"Bairro: {package.neighborhood or '-'}\n"
+                f"Pacote: {(delivered_codes[0] if delivered_codes else '-') }\n"
+                f"Endereço: {primary_addr or '-'}\n"
+                f"Bairro: {primary_neighborhood or '-'}\n"
                 f"Recebedor: {receiver_name}\n"
                 f"Documento: {receiver_doc}\n"
                 f"Observações: {notes}\n"
