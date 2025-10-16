@@ -1,4 +1,11 @@
 services:
+  # Banco de dados PostgreSQL compartilhado
+  - type: pserv
+    name: entrega-db
+    env: docker
+    plan: starter
+    ipAllowList: []
+    
   - type: web
     name: entrega-web
     env: docker
@@ -13,9 +20,12 @@ services:
       - key: BASE_URL
         sync: false
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: entrega-db
+          property: connectionString
     healthCheckPath: /health
     plan: standard
+    
   - type: worker
     name: entrega-bot
     env: docker
@@ -30,5 +40,9 @@ services:
       - key: BASE_URL
         sync: false
       - key: DATABASE_URL
+        fromDatabase:
+          name: entrega-db
+          property: connectionString
+      - key: GEMINI_API_KEY
         sync: false
     plan: standard
