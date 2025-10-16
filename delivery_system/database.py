@@ -52,6 +52,7 @@ class User(Base):
     telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True, index=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # 'manager' | 'driver'
+    channel_id: Mapped[Optional[str]] = mapped_column(String(255))  # ID do canal para provas de entrega
 
     # relationships
     assigned_routes: Mapped[List["Route"]] = relationship(

@@ -36,9 +36,9 @@
     return R * c; // Distância em metros
   }
 
-  // Agrupa pacotes próximos (raio de 50 metros)
+  // Agrupa pacotes próximos (raio de 30 metros)
   function clusterPackages(packages) {
-    const CLUSTER_RADIUS = 50; // metros
+    const CLUSTER_RADIUS = 30; // metros
     const clusters = [];
     const processed = new Set();
 

@@ -59,6 +59,7 @@ IMPORT_SCRAPING_READY = 12
 PHOTO1, PHOTO2, NAME, DOC, NOTES = range(5)
 ADD_DRIVER_TID, ADD_DRIVER_NAME = range(10, 12)
 SEND_SELECT_ROUTE, SEND_SELECT_DRIVER = range(20, 22)
+CONFIG_CHANNEL_SELECT_DRIVER, CONFIG_CHANNEL_ENTER_ID = range(23, 25)
 
 # Estados financeiros (APENAS MANAGERS)
 FIN_KM, FIN_FUEL_YN, FIN_FUEL_TYPE, FIN_FUEL_LITERS, FIN_FUEL_AMOUNT = range(30, 35)
@@ -255,7 +256,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "👥 *Gestão de Equipe*\n"
                 "• `/cadastrardriver` - Cadastra um novo motorista\n"
                 "• `/drivers` - Lista motoristas \\(🟢 em rota / ⚪ disponível\\)\n"
-                "  _Clique em 🗺️ para rastrear ou 🗑️ para excluir_\n\n"
+                "  _Clique em 🗺️ para rastrear ou 🗑️ para excluir_\n"
+                "• `/configurarcanal` - 🆕 *Configura canal de entregas*\n"
+                "  _Provas vão para canal separado, sem poluição\\!_\n\n"
                 "💰 *Financeiro*\n"
                 "• `/registrardia` - Registra dados financeiros diários\n"
                 "  \\(KM rodados, combustível, ganhos, salários\\)\n"
@@ -267,13 +270,18 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• Status de cada pacote em tempo real\n"
                 "• Notificações de entregas concluídas\n"
                 "• Histórico completo com fotos\n\n"
+                "📢 *Canais de Entregas:*\n"
+                "• Crie um canal privado para cada motorista\n"
+                "• Configure com /configurarcanal\n"
+                "• Provas de entrega organizadas e separadas\n"
+                "• Sem poluição no bot principal\n\n"
                 "🔧 *Utilitários*\n"
                 "• `/meu_id` - Exibe seu Telegram ID\n"
                 "• `/help` - Mostra esta mensagem de ajuda\n\n"
                 "💡 *Dicas:*\n"
                 "✅ Nomeie suas rotas \\(ex: Zona Sul, Centro\\)\n"
+                "✅ Configure canais para organizar entregas\n"
                 "✅ Use /rastrear para acompanhar em tempo real\n"
-                "✅ Salve o link do mapa para acesso rápido\n"
                 "✅ Relatórios IA ajudam na tomada de decisão"
             )
         else:
@@ -588,6 +596,191 @@ async def on_track_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         
+    finally:
+        db.close()
+
+
+async def cmd_configurarcanal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Configura canal do Telegram para receber provas de entrega de um motorista"""
+    db = SessionLocal()
+    try:
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem configurar canais.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
+        # Lista motoristas
+        drivers = db.query(User).filter(User.role == "driver").all()
+        
+        if not drivers:
+            await update.message.reply_text(
+                "📭 *Nenhum Motorista Cadastrado*\n\n"
+                "Use /cadastrardriver para cadastrar motoristas primeiro!",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
+        # Cria keyboard com motoristas
+        keyboard = []
+        for driver in drivers[:20]:
+            name = driver.full_name or f"ID {driver.telegram_user_id}"
+            has_channel = "✅" if driver.channel_id else "⚪"
+            
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{has_channel} {name}",
+                    callback_data=f"config_channel:{driver.id}"
+                )
+            ])
+        
+        await update.message.reply_text(
+            "📢 *Configurar Canal de Entregas*\n\n"
+            "Selecione o motorista:\n\n"
+            "✅ = Canal já configurado\n"
+            "⚪ = Sem canal",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        return CONFIG_CHANNEL_SELECT_DRIVER
+        
+    finally:
+        db.close()
+
+
+async def on_config_channel_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback quando motorista é selecionado para configurar canal"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("config_channel:"):
+        return CONFIG_CHANNEL_SELECT_DRIVER
+    
+    driver_id = int(data.split(":", 1)[1])
+    context.user_data['config_channel_driver_id'] = driver_id
+    
+    db = SessionLocal()
+    try:
+        driver = db.get(User, driver_id)
+        if not driver:
+            await query.answer("❌ Motorista não encontrado!", show_alert=True)
+            return ConversationHandler.END
+        
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+        current_channel = driver.channel_id or "Nenhum"
+        
+        await query.edit_message_text(
+            f"📢 *Configurar Canal*\n\n"
+            f"👤 *Motorista:* {driver_name}\n"
+            f"📡 *Canal Atual:* `{current_channel}`\n\n"
+            f"🔧 *Como obter o ID do canal:*\n\n"
+            f"1️⃣ Crie um canal privado no Telegram\n"
+            f"2️⃣ Adicione o bot como administrador\n"
+            f"3️⃣ Envie /meu_id no canal\n"
+            f"4️⃣ O bot responderá com o ID do canal\n"
+            f"5️⃣ Copie o ID e envie aqui\n\n"
+            f"💡 *Agora envie o ID do canal:*\n"
+            f"_Exemplo: -1001234567890_\n\n"
+            f"Ou envie *REMOVER* para desconfigurar o canal.",
+            parse_mode='Markdown'
+        )
+        return CONFIG_CHANNEL_ENTER_ID
+        
+    finally:
+        db.close()
+
+
+async def on_config_channel_enter_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe o ID do canal e salva"""
+    channel_input = update.message.text.strip()
+    driver_id = context.user_data.get('config_channel_driver_id')
+    
+    if not driver_id:
+        await update.message.reply_text(
+            "❌ *Sessão Expirada*\n\n"
+            "Use /configurarcanal novamente.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
+    db = SessionLocal()
+    try:
+        driver = db.get(User, driver_id)
+        if not driver:
+            await update.message.reply_text(
+                "❌ *Motorista não encontrado!*",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+        
+        # Verifica se quer remover
+        if channel_input.upper() == "REMOVER":
+            driver.channel_id = None
+            db.commit()
+            
+            await update.message.reply_text(
+                f"✅ *Canal Removido!*\n\n"
+                f"👤 *Motorista:* {driver_name}\n\n"
+                f"As provas de entrega voltarão a ser enviadas para você.",
+                parse_mode='Markdown'
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+        
+        # Valida formato do ID do canal
+        if not channel_input.startswith('-100'):
+            await update.message.reply_text(
+                "⚠️ *ID Inválido!*\n\n"
+                "O ID do canal deve começar com `-100`\n"
+                "Exemplo: `-1001234567890`\n\n"
+                "Tente novamente ou envie *CANCELAR*.",
+                parse_mode='Markdown'
+            )
+            return CONFIG_CHANNEL_ENTER_ID
+        
+        # Testa se o bot consegue acessar o canal
+        try:
+            await context.bot.send_message(
+                chat_id=channel_input,
+                text=f"✅ *Canal Configurado com Sucesso!*\n\n"
+                     f"👤 *Motorista:* {driver_name}\n\n"
+                     f"📸 As provas de entrega serão enviadas para este canal.",
+                parse_mode='Markdown'
+            )
+            
+            # Salva no banco
+            driver.channel_id = channel_input
+            db.commit()
+            
+            await update.message.reply_text(
+                f"✅ *Canal Configurado!*\n\n"
+                f"👤 *Motorista:* {driver_name}\n"
+                f"📡 *Canal:* `{channel_input}`\n\n"
+                f"📸 As próximas entregas dele serão enviadas para o canal!",
+                parse_mode='Markdown'
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+            
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ *Erro ao Acessar o Canal!*\n\n"
+                f"Possíveis causas:\n"
+                f"• O bot não foi adicionado como administrador\n"
+                f"• O ID está incorreto\n"
+                f"• O canal não existe\n\n"
+                f"Detalhes: {str(e)}\n\n"
+                f"Tente novamente ou envie *CANCELAR*.",
+                parse_mode='Markdown'
+            )
+            return CONFIG_CHANNEL_ENTER_ID
+    
     finally:
         db.close()
 
@@ -1547,54 +1740,121 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
-    # Notificar managers com resumo básico
+    # Notificar managers OU canal configurado do motorista
     try:
         db2 = SessionLocal()
-        package = db2.get(Package, int(pkg_id)) if db2 else None
+        package = db2.get(Package, int(pkg_id))
+        driver = get_user_by_tid(db2, update.effective_user.id)
     finally:
         db2.close()
-    if package:
+    
+    if package and driver:
         receiver_name = context.user_data.get('receiver_name') or '-'
         receiver_doc = context.user_data.get('receiver_document') or '-'
         notes = context.user_data.get('notes') or '-'
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
         
+        # Mensagem formatada para o canal
         summary = (
             f"✅ *Entrega Concluída!*\n\n"
-            f"📦 *Pacote:* {package.tracking_code}\n"
+            f"� *Motorista:* {driver_name}\n"
+            f"�📦 *Pacote:* {package.tracking_code}\n"
             f"📍 *Endereço:* {package.address or '-'}\n"
-            f"� *Recebedor:* {receiver_name}\n"
+            f"🏘️ *Bairro:* {package.neighborhood or '-'}\n"
+            f"👥 *Recebedor:* {receiver_name}\n"
             f"🆔 *Documento:* {receiver_doc}\n"
-            f"📝 *Observações:* {notes}"
+            f"📝 *Observações:* {notes}\n"
+            f"🕐 *Data/Hora:* {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
         )
-        await notify_managers(summary, context)
-        # Envia as fotos aos managers para consulta/baixa no próprio Telegram
-        p1 = context.user_data.get("photo1_file_id")
-        p2 = context.user_data.get("photo2_file_id")
-        if p1 or p2:
-            dbm = SessionLocal()
+        
+        # Verifica se motorista tem canal configurado
+        if driver.channel_id:
+            # Envia para o CANAL
             try:
-                managers = dbm.query(User).filter(User.role == "manager").all()
-            finally:
-                dbm.close()
-            for m in managers:
+                await context.bot.send_message(
+                    chat_id=driver.channel_id,
+                    text=summary,
+                    parse_mode='Markdown'
+                )
+                
+                # Envia fotos para o canal
+                p1 = context.user_data.get("photo1_file_id")
+                p2 = context.user_data.get("photo2_file_id")
+                
                 if p1:
                     try:
                         await context.bot.send_photo(
-                            chat_id=m.telegram_user_id,
+                            chat_id=driver.channel_id,
                             photo=p1,
                             caption="📸 Foto 1 - Recebedor/Pacote"
                         )
                     except Exception:
                         pass
+                
                 if p2:
                     try:
                         await context.bot.send_photo(
-                            chat_id=m.telegram_user_id,
+                            chat_id=driver.channel_id,
                             photo=p2,
                             caption="📸 Foto 2 - Local/Porta"
                         )
                     except Exception:
                         pass
+                
+            except Exception as e:
+                # Se falhar, envia para os managers como fallback
+                await notify_managers(f"⚠️ Erro ao enviar para canal: {str(e)}\n\n{summary}", context)
+                
+                p1 = context.user_data.get("photo1_file_id")
+                p2 = context.user_data.get("photo2_file_id")
+                if p1 or p2:
+                    dbm = SessionLocal()
+                    try:
+                        managers = dbm.query(User).filter(User.role == "manager").all()
+                    finally:
+                        dbm.close()
+                    for m in managers:
+                        if p1:
+                            try:
+                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="📸 Foto 1")
+                            except Exception:
+                                pass
+                        if p2:
+                            try:
+                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="📸 Foto 2")
+                            except Exception:
+                                pass
+        else:
+            # Sem canal configurado - envia para os MANAGERS (comportamento original)
+            await notify_managers(summary, context)
+            
+            p1 = context.user_data.get("photo1_file_id")
+            p2 = context.user_data.get("photo2_file_id")
+            if p1 or p2:
+                dbm = SessionLocal()
+                try:
+                    managers = dbm.query(User).filter(User.role == "manager").all()
+                finally:
+                    dbm.close()
+                for m in managers:
+                    if p1:
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=m.telegram_user_id,
+                                photo=p1,
+                                caption="📸 Foto 1 - Recebedor/Pacote"
+                            )
+                        except Exception:
+                            pass
+                    if p2:
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=m.telegram_user_id,
+                                photo=p2,
+                                caption="📸 Foto 2 - Local/Porta"
+                            )
+                        except Exception:
+                            pass
 
     await update.message.reply_text(
         "✅ *Entrega Registrada!*\n\n"
@@ -2024,6 +2284,18 @@ def build_application():
 
     app.add_handler(CommandHandler("rastrear", cmd_rastrear))
     app.add_handler(CallbackQueryHandler(on_track_route, pattern=r"^track_route:\d+$"))
+    
+    config_channel_conv = ConversationHandler(
+        entry_points=[CommandHandler("configurarcanal", cmd_configurarcanal)],
+        states={
+            CONFIG_CHANNEL_SELECT_DRIVER: [CallbackQueryHandler(on_config_channel_select, pattern=r"^config_channel:\d+$")],
+            CONFIG_CHANNEL_ENTER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, on_config_channel_enter_id)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        name="config_channel_conv",
+        persistent=False,
+    )
+    app.add_handler(config_channel_conv)
     
     app.add_handler(CommandHandler("enviarrota", cmd_enviarrota))
     app.add_handler(CallbackQueryHandler(on_select_route, pattern=r"^sel_route:\d+$"))
