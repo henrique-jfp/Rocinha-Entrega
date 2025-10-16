@@ -25,6 +25,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from telegram.error import TelegramError
 
 from database import (
     SessionLocal, init_db, User, Route, Package, DeliveryProof,
@@ -2290,6 +2291,15 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db2 = SessionLocal()
         package = db2.get(Package, int(pkg_id))
         driver = get_user_by_tid(db2, update.effective_user.id)
+        # Captura route_id e nome da rota antes de fechar a sessão para evitar DetachedInstanceError
+        route_id = package.route_id if package else None
+        route_name = None
+        if route_id is not None:
+            try:
+                route_obj = db2.query(Route).filter(Route.id == route_id).first()
+                route_name = route_obj.name if route_obj and route_obj.name else f"Rota {route_id}"
+            except Exception:
+                route_name = f"Rota {route_id}"
     finally:
         db2.close()
     
@@ -2302,14 +2312,17 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Calcula progresso da rota
         db_progress = SessionLocal()
         try:
-            route = package.route
-            total_packages = db_progress.query(Package).filter(Package.route_id == route.id).count()
-            delivered_packages = db_progress.query(Package).filter(
-                Package.route_id == route.id,
-                Package.status == "delivered"
-            ).count()
-            remaining_packages = total_packages - delivered_packages
-            route_name = route.name or f"Rota {route.id}"
+            if route_id is not None:
+                total_packages = db_progress.query(Package).filter(Package.route_id == route_id).count()
+                delivered_packages = db_progress.query(Package).filter(
+                    Package.route_id == route_id,
+                    Package.status == "delivered"
+                ).count()
+            else:
+                total_packages = 0
+                delivered_packages = 0
+            remaining_packages = max(0, total_packages - delivered_packages)
+            route_name = route_name or (f"Rota {route_id}" if route_id is not None else "Rota")
         finally:
             db_progress.close()
         
@@ -3035,6 +3048,22 @@ def build_application():
         persistent=False,
     )
     app.add_handler(financial_conv)
+
+    # Error handler global para evitar que exceções derrubem o loop
+    async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            err = context.error
+            print(f"[ERROR] {err}")
+            # Opcionalmente, informa o usuário se houver contexto de mensagem
+            if isinstance(update, Update) and getattr(update, 'message', None):
+                try:
+                    await update.message.reply_text("⚠️ Ocorreu um erro temporário. Tente novamente em instantes.")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    app.add_error_handler(on_error)
 
     return app
 
