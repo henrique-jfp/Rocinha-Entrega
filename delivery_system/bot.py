@@ -703,11 +703,11 @@ async def on_config_channel_select(update: Update, context: ContextTypes.DEFAULT
             f"🔧 *Como obter o ID do canal:*\n\n"
             f"1️⃣ Crie um canal privado no Telegram\n"
             f"2️⃣ Adicione o bot como administrador\n"
-            f"3️⃣ Envie /meu_id no canal\n"
+            f"3️⃣ Envie /meu\\_id no canal\n"
             f"4️⃣ O bot responderá com o ID do canal\n"
             f"5️⃣ Copie o ID e envie aqui\n\n"
             f"💡 *Agora envie o ID do canal:*\n"
-            f"_Exemplo: -1001234567890_\n\n"
+            f"Exemplo: `-1001234567890`\n\n"
             f"Ou envie *REMOVER* para desconfigurar o canal.",
             parse_mode='Markdown'
         )
