@@ -279,54 +279,71 @@ async def notify_managers(text: str, context: ContextTypes.DEFAULT_TYPE):
 
 # Comandos
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /start - Cadastro inicial e boas-vindas"""
+    """Comando /start - Cadastro inicial e boas-vindas OU inicia entrega via deep link"""
     init_db()
     u = update.effective_user
     user = register_manager_if_first(u.id, u.full_name)
 
     # Verifica se veio do mapa (deep link de entrega)
-    # IMPORTANTE: context.args só funciona quando o comando vem de mensagem direta.
-    # Quando o usuário clica no botão START do Telegram (após abrir t.me/bot?start=X),
-    # o parâmetro vem na mensagem de texto /start X (não em args).
+    # IMPORTANTE: O Telegram sempre usa /start para deep links, não /entrega
+    # O formato é: t.me/bot?start=PARAMETRO → bot recebe /start PARAMETRO
     args = context.args or []
-    print(f"DEBUG: context.args = {args}")
+    print(f"DEBUG /start: context.args = {args}")
     if not args and update.message and update.message.text:
         # Fallback: extrai parâmetro da mensagem de texto "/start <param>"
         parts = update.message.text.strip().split(maxsplit=1)
-        print(f"DEBUG: update.message.text = '{update.message.text}'")
-        print(f"DEBUG: parts = {parts}")
+        print(f"DEBUG /start: update.message.text = '{update.message.text}'")
+        print(f"DEBUG /start: parts = {parts}")
         if len(parts) == 2:
             args = [parts[1]]
-            print(f"DEBUG: args from message = {args}")
+            print(f"DEBUG /start: args from message = {args}")
     
     if args and len(args) >= 1:
         arg = args[0]
-        print(f"DEBUG: processing arg = '{arg}'")
-        # Novo formato curto: deliverg_<token>
+        print(f"DEBUG /start: processing arg = '{arg}'")
+        
+        # Remove prefixo "entrega_" se presente (vem do deep link)
+        if arg.startswith("entrega_"):
+            arg = arg[8:]  # Remove "entrega_" prefix
+            print(f"DEBUG /start: removed entrega_ prefix, now arg = '{arg}'")
+        
+        # Formato token curto: deliverg_<token>
         if arg.startswith("deliverg_"):
             token = arg.split("deliverg_", 1)[1]
-            print(f"DEBUG: deliverg_ token = '{token}'")
+            print(f"DEBUG /start: deliverg_ token = '{token}'")
             db = SessionLocal()
             try:
                 rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
-                print(f"DEBUG: LinkToken found = {rec is not None}")
+                print(f"DEBUG /start: LinkToken found = {rec is not None}")
                 if rec:
-                    print(f"DEBUG: rec.data = {rec.data}")
-                    print(f"DEBUG: rec.type = {rec.type}")
+                    print(f"DEBUG /start: rec.data = {rec.data}")
+                    print(f"DEBUG /start: rec.type = {rec.type}")
                 if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
                     context.user_data["deliver_package_ids"] = list(map(int, rec.data["ids"]))
-                    print(f"DEBUG: deliver_package_ids set to {context.user_data['deliver_package_ids']}")
+                    print(f"DEBUG /start: deliver_package_ids set to {context.user_data['deliver_package_ids']}")
                     keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
                     await update.message.reply_text(
-                        "📦 Como será esta entrega?",
-                        reply_markup=keyboard
+                        "📦 *Entrega Múltipla*\n\n"
+                        f"🎯 {len(context.user_data['deliver_package_ids'])} pacotes selecionados\n\n"
+                        "Como será esta entrega?",
+                        reply_markup=keyboard,
+                        parse_mode='Markdown'
                     )
                     return MODE_SELECT
                 else:
-                    print("DEBUG: Token not found or invalid data")
+                    print("DEBUG /start: Token not found or invalid data")
+                    await update.message.reply_text(
+                        "❌ *Token Inválido*\n\n"
+                        "Este link de entrega expirou ou é inválido.\n\n"
+                        "Use o mapa interativo para gerar um novo link.",
+                        parse_mode='Markdown'
+                    )
+                    return ConversationHandler.END
             finally:
                 db.close()
-        if arg.startswith("deliver_group_"):
+        
+        # Formato legado: deliver_group_<id1>_<id2>_...
+        elif arg.startswith("deliver_group_"):
             try:
                 ids_str = arg.split("deliver_group_", 1)[1]
                 ids = [int(x) for x in ids_str.split("_") if x.isdigit()]
@@ -334,31 +351,36 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     context.user_data["deliver_package_ids"] = ids
                     keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
                     await update.message.reply_text(
-                        "📦 Como será esta entrega?",
-                        reply_markup=keyboard
+                        "📦 *Entrega Múltipla*\n\n"
+                        f"🎯 {len(ids)} pacotes selecionados\n\n"
+                        "Como será esta entrega?",
+                        reply_markup=keyboard,
+                        parse_mode='Markdown'
                     )
                     return MODE_SELECT
             except Exception:
                 pass
-        if arg.startswith("deliver_"):
-            # Extrai o ID do pacote
+        
+        # Formato único: deliver_<id>
+        elif arg.startswith("deliver_"):
             try:
                 package_id_str = arg.split("deliver_", 1)[1]
                 package_id = int(package_id_str)
                 context.user_data["deliver_package_id"] = package_id
                 
-                # Antes de tudo, pergunta o modo
                 keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
                 await update.message.reply_text(
-                    "📦 Como será esta entrega?",
-                    reply_markup=keyboard
+                    "📦 *Iniciar Entrega*\n\n"
+                    "Como será esta entrega?",
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
                 )
                 return MODE_SELECT
             except (ValueError, IndexError):
                 pass
 
     # Mensagem de boas-vindas personalizada (sem deep link)
-    print("DEBUG: Falling back to welcome message")
+    print("DEBUG /start: No delivery params, showing welcome message")
     if user.role == "manager":
         await update.message.reply_text(
             f"👋 Olá, *{u.first_name}*!\n\n"
