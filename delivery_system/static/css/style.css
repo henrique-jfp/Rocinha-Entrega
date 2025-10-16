@@ -26,6 +26,108 @@ body { display: flex; flex-direction: column; }
 #map-container { flex: 1; position: relative; min-height: 300px; }
 #map { position: absolute; inset: 0; }
 
+/* Botão toggle sidebar */
+.toggle-btn {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  background: #6366f1;
+  color: white;
+  border: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  transition: all 0.3s;
+}
+
+.toggle-btn:hover {
+  background: #4f46e5;
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.6);
+}
+
+.toggle-btn:active {
+  transform: scale(0.95);
+}
+
+/* Sidebar com animação */
+#sidebar {
+  background: #f5f5f5;
+  border-top: 1px solid #e0e0e0;
+  overflow: hidden;
+  max-height: 45vh;
+  transition: max-height 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+#sidebar.collapsed {
+  max-height: 0 !important;
+  border-top: none;
+}
+
+/* Barra de busca */
+#search-bar {
+  padding: 12px;
+  background: #fff;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+#search-input {
+  flex: 1;
+  padding: 10px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#search-input:focus {
+  border-color: #6366f1;
+}
+
+#clear-search {
+  background: #ef4444;
+  color: white;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+#clear-search:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
+/* Lista de pacotes */
+#package-list {
+  list-style: none;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Item oculto na busca */
+.list-item.hidden {
+  display: none !important;
+}
+
 /* Zoom controls mais bonitos */
 .leaflet-control-zoom {
   border: none !important;
@@ -64,21 +166,6 @@ body { display: flex; flex-direction: column; }
 /* Melhora contraste do mapa */
 #map {
   filter: contrast(1.05) brightness(0.98);
-}
-
-/* Lista de pacotes */
-#sidebar {
-  background: #f5f5f5;
-  border-top: 1px solid #e0e0e0;
-  overflow-y: auto;
-  max-height: 45vh;
-}
-#package-list {
-  list-style: none;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 /* Card de pacote */

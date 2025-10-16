@@ -17,13 +17,22 @@
   <div id="layout">
     <div id="map-container">
       <div id="map"></div>
+      <!-- Botão toggle sidebar -->
+      <button id="toggle-sidebar" class="toggle-btn" title="Mostrar/Ocultar Lista">
+        📋
+      </button>
     </div>
     <div id="sidebar">
+      <!-- Barra de busca -->
+      <div id="search-bar">
+        <input type="text" id="search-input" placeholder="🔍 Buscar por endereço ou código..." />
+        <button id="clear-search" style="display: none;">✕</button>
+      </div>
       <ul id="package-list"></ul>
     </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="/static/js/map.js?v=2"></script>
+  <script src="/static/js/map.js?v=3"></script>
 </body>
 </html>

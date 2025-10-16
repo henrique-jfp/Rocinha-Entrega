@@ -12,10 +12,10 @@
     zoomControl: true
   });
   
-  // Usa apenas camada detalhada CARTO Voyager - melhor visualização para Rocinha
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  // Usar OpenStreetMap com mais detalhes (similar ao Google Maps)
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    attribution: '© OpenStreetMap, © CARTO'
+    attribution: '© OpenStreetMap contributors'
   }).addTo(map);
 
   const markersLayer = L.layerGroup().addTo(map);
@@ -549,4 +549,48 @@
 
   // Refresh every 30 seconds (atualização rápida para feedback em tempo real)
   setInterval(loadPackages, 30_000);
+
+  // ==================== BUSCA E TOGGLE ====================
+  
+  // Toggle sidebar (recolher/expandir lista)
+  const toggleBtn = document.getElementById('toggle-sidebar');
+  const sidebar = document.getElementById('sidebar');
+  let sidebarCollapsed = false;
+
+  toggleBtn.addEventListener('click', () => {
+    sidebarCollapsed = !sidebarCollapsed;
+    sidebar.classList.toggle('collapsed', sidebarCollapsed);
+    toggleBtn.textContent = sidebarCollapsed ? '📋' : '✕';
+    toggleBtn.title = sidebarCollapsed ? 'Mostrar Lista' : 'Ocultar Lista';
+  });
+
+  // Busca na lista
+  const searchInput = document.getElementById('search-input');
+  const clearSearchBtn = document.getElementById('clear-search');
+
+  searchInput.addEventListener('input', (e) => {
+    const query = e.target.value.toLowerCase().trim();
+    const listItems = document.querySelectorAll('.list-item');
+
+    if (query === '') {
+      // Mostrar todos
+      listItems.forEach(item => item.classList.remove('hidden'));
+      clearSearchBtn.style.display = 'none';
+    } else {
+      // Filtrar
+      clearSearchBtn.style.display = 'block';
+      listItems.forEach(item => {
+        const code = item.querySelector('.pkg-code')?.textContent.toLowerCase() || '';
+        const addr = item.querySelector('.pkg-addr')?.textContent.toLowerCase() || '';
+        const matches = code.includes(query) || addr.includes(query);
+        item.classList.toggle('hidden', !matches);
+      });
+    }
+  });
+
+  clearSearchBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    searchInput.dispatchEvent(new Event('input'));
+    searchInput.focus();
+  });
 })();
