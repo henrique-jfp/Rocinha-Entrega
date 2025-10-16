@@ -1466,12 +1466,17 @@ async def on_select_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = query.data or ""
     if not data.startswith("sel_driver:"):
+        await query.answer()
         return
+    
     driver_tid = int(data.split(":", 1)[1])
     route_id = context.user_data.get("send_route_id")
+    
+    # Responde IMEDIATAMENTE ao callback para evitar timeout
+    await query.answer("Processando rota...")
+    
     if not route_id:
         await query.edit_message_text(
             "❌ *Erro Interno*\n\n"
@@ -1490,13 +1495,30 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
+        
         driver = get_user_by_tid(db, driver_tid)
         if not driver:
             driver = User(telegram_user_id=driver_tid, full_name=None, role="driver")
             db.add(driver)
             db.flush()
+        
         route.assigned_to_id = driver.id
         db.commit()
+        
+        # Informações básicas
+        count = db.query(Package).filter(Package.route_id == route.id).count()
+        route_name = route.name or f"Rota {route.id}"
+        driver_name = driver.full_name or f"ID {driver_tid}"
+        
+        # Edita mensagem para mostrar progresso
+        await query.edit_message_text(
+            f"⏳ *Processando Rota...*\n\n"
+            f"📦 *Rota:* {route_name}\n"
+            f"👤 *Motorista:* {driver_name}\n"
+            f"📊 *Pacotes:* {count}\n\n"
+            f"🔄 _Otimizando sequência de entregas..._",
+            parse_mode='Markdown'
+        )
         
         # ==================== OTIMIZAÇÃO DE ROTA POR MOTORISTA ====================
         # Busca todos os pacotes da rota
@@ -1513,13 +1535,10 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if driver.home_latitude and driver.home_longitude:
             opt_msg = f"\n🎯 *Rota otimizada* a partir da casa do motorista!"
         else:
-            opt_msg = f"\n⚠️ _Motorista sem endereço cadastrado\\. Use /configurarcasa\\._"
+            opt_msg = f"\n⚠️ _Motorista sem endereço cadastrado. Use /configurarcasa._"
         # ========================================================================
         
-        count = db.query(Package).filter(Package.route_id == route.id).count()
         link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
-        route_name = route.name or f"Rota {route.id}"
-        driver_name = driver.full_name or f"ID {driver_tid}"
         
         try:
             await context.bot.send_message(
