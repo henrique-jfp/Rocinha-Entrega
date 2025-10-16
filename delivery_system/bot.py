@@ -17,6 +17,7 @@ from telegram import (
 )
 from telegram.constants import ChatAction
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
@@ -3335,12 +3336,23 @@ def build_application():
         raise RuntimeError("Defina a variável de ambiente BOT_TOKEN")
     init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(_post_init).build()
+    
+    # Configura todos os handlers
+    setup_bot_handlers(app)
+    
+    return app
 
+
+def setup_bot_handlers(app: Application):
+    """
+    Configura os handlers do bot sem iniciar polling.
+    Usado para integração com webhook no unified_app.py
+    """
     # Comandos básicos
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
-    app.add_handler(CommandHandler("cancelar", cmd_cancelar))  # Cancelar universal
+    app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
     import_conv = ConversationHandler(
         entry_points=[CommandHandler("importar", cmd_importar)],
@@ -3371,7 +3383,6 @@ def build_application():
     )
     app.add_handler(config_channel_conv)
     
-    # Configurar endereço de casa (motorista ou manager)
     config_home_conv = ConversationHandler(
         entry_points=[CommandHandler("configurarcasa", cmd_configurarcasa)],
         states={
@@ -3397,9 +3408,9 @@ def build_application():
     delivery_conv = ConversationHandler(
         entry_points=[
             CommandHandler("entregar", deliver_start),
-            CommandHandler("entrega", cmd_entrega),  # Novo comando dedicado para entregas
-            CommandHandler("iniciar", cmd_iniciar),  # Deep link do mapa: /iniciar deliver_X
-            CommandHandler("start", cmd_start),      # Deep link tradicional: /start deliver_X
+            CommandHandler("entrega", cmd_entrega),
+            CommandHandler("iniciar", cmd_iniciar),
+            CommandHandler("start", cmd_start),
         ],
         states={
             MODE_SELECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, on_mode_select)],
@@ -3418,9 +3429,6 @@ def build_application():
         persistent=False,
     )
     app.add_handler(delivery_conv)
-    
-    # Obs: /start também está no ConversationHandler para deep links, mas tem mensagem de
-    # boas-vindas como fallback quando não há parâmetros de entrega.
 
     add_driver_conv = ConversationHandler(
         entry_points=[CommandHandler("cadastrardriver", add_driver_start)],
@@ -3435,7 +3443,6 @@ def build_application():
     app.add_handler(add_driver_conv)
     app.add_handler(CommandHandler("drivers", list_drivers))
 
-    # Financial conversation (MANAGERS ONLY)
     financial_conv = ConversationHandler(
         entry_points=[CommandHandler("registrardia", fin_start)],
         states={
@@ -3458,17 +3465,14 @@ def build_application():
     )
     app.add_handler(financial_conv)
 
-    # Error handler global para evitar que exceções derrubem o loop
     async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             err = context.error
             print(f"[ERROR] {err}")
-            # Não incomodar o usuário com conflitos de polling ou erros sem update
             err_text = str(err) if err is not None else ""
             conflict = "terminated by other getUpdates request" in err_text
             if conflict or not isinstance(update, Update):
                 return
-            # Erro atrelado a uma mensagem do usuário -> resposta curta
             if getattr(update, 'message', None):
                 try:
                     await update.message.reply_text("⚠️ Ocorreu um erro temporário. Tente novamente em instantes.")
@@ -3478,8 +3482,6 @@ def build_application():
             pass
 
     app.add_error_handler(on_error)
-
-    return app
 
 
 def main():
