@@ -1,11 +1,13 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import pandas as pd
+import numpy as np
 import google.generativeai as genai
 from dotenv import load_dotenv
+from python_tsp.exact import solve_tsp_dynamic_programming
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -41,6 +43,11 @@ IMPORTS_DIR.mkdir(parents=True, exist_ok=True)
 BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8001")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "SEU_BOT_USERNAME")
 
+# Coordenadas do ponto de início (sua loja/centro de distribuição)
+# IMPORTANTE: Altere para as coordenadas reais da sua localização!
+DEPOT_LAT = float(os.getenv("DEPOT_LAT", "-22.988000"))  # Exemplo: Rocinha, RJ
+DEPOT_LON = float(os.getenv("DEPOT_LON", "-43.248000"))
+
 # Configurar Gemini API
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
@@ -66,6 +73,106 @@ FIN_KM, FIN_FUEL_YN, FIN_FUEL_TYPE, FIN_FUEL_LITERS, FIN_FUEL_AMOUNT = range(30,
 FIN_INCOME, FIN_SALARY_YN, FIN_SALARY_NAME, FIN_SALARY_AMOUNT, FIN_SALARY_MORE = range(35, 40)
 FIN_EXPENSES, FIN_NOTES = range(40, 42)
 
+
+# ==================== OTIMIZAÇÃO DE ROTA (TSP) ====================
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calcula distância Haversine entre dois pontos (em km)."""
+    R = 6371  # Raio da Terra em km
+    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    return R * c
+
+
+def optimize_route_packages(db, packages: List[Package], start_lat: float, start_lon: float) -> int:
+    """
+    Calcula a ordem otimizada (TSP) dos pacotes pendentes e atualiza o DB.
+    Usa distância Haversine como métrica (melhor para caminhada/carro).
+    
+    Args:
+        db: Sessão do banco de dados
+        packages: Lista de pacotes da rota
+        start_lat: Latitude do ponto de início (depot)
+        start_lon: Longitude do ponto de início (depot)
+    
+    Returns:
+        Número de pacotes otimizados
+    """
+    # 1. Filtrar pacotes que têm coordenadas
+    packages_to_optimize = [
+        p for p in packages 
+        if p.latitude is not None and p.longitude is not None
+    ]
+
+    if len(packages_to_optimize) < 2:
+        # Se tem 0 ou 1 pacote com coordenadas, não há o que otimizar
+        order = 1
+        for pkg in packages:
+            pkg.order_in_route = order
+            db.add(pkg)
+            order += 1
+        db.commit()
+        return 0
+
+    # 2. Criar lista de coordenadas (Depot + Pacotes)
+    coords = [(start_lat, start_lon)] + [
+        (p.latitude, p.longitude) for p in packages_to_optimize
+    ]
+    num_locations = len(coords)
+
+    # 3. Calcular Matriz de Custo usando Haversine
+    cost_matrix = np.zeros((num_locations, num_locations))
+    for i in range(num_locations):
+        for j in range(num_locations):
+            if i != j:
+                cost_matrix[i, j] = haversine_distance(
+                    coords[i][0], coords[i][1],
+                    coords[j][0], coords[j][1]
+                )
+
+    # 4. Resolver TSP (Depot é índice 0)
+    try:
+        permutation, distance = solve_tsp_dynamic_programming(cost_matrix)
+    except Exception as e:
+        print(f"⚠️ Erro ao otimizar rota: {e}")
+        # Fallback: manter ordem original
+        order = 1
+        for pkg in packages:
+            pkg.order_in_route = order
+            db.add(pkg)
+            order += 1
+        db.commit()
+        return 0
+
+    # 5. Atualizar ordem no banco de dados
+    # permutation[0] é sempre o depot, ignoramos
+    # permutation[1:] contém os índices dos pacotes na ordem otimizada
+    new_order = 1
+    for idx in permutation[1:]:
+        # idx - 1 porque o depot está no índice 0 de coords
+        if idx > 0:  # Garantir que não é o depot
+            package_obj = packages_to_optimize[idx - 1]
+            package_obj.order_in_route = new_order
+            db.add(package_obj)
+            new_order += 1
+
+    # 6. Pacotes sem coordenadas vão para o final
+    for pkg in packages:
+        if pkg.order_in_route is None:
+            pkg.order_in_route = new_order
+            db.add(pkg)
+            new_order += 1
+
+    db.commit()
+    
+    print(f"✅ Rota otimizada: {len(packages_to_optimize)} pacotes, distância total: {distance:.2f} km")
+    return len(packages_to_optimize)
+
+
+# ==================== UTILIDADES ====================
 
 # Utilidades
 def _find_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -934,12 +1041,23 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data['import_tracking_codes'] = [it["tracking_code"] for it in items]
         context.user_data['import_package_count'] = len(items)
         
+        # ==================== OTIMIZAÇÃO AUTOMÁTICA DE ROTA ====================
+        # Busca todos os pacotes da rota recém-criada
+        all_packages = db.query(Package).filter(Package.route_id == route.id).all()
+        
+        # Otimiza a ordem usando TSP (Traveling Salesperson Problem)
+        optimized_count = optimize_route_packages(db, all_packages, DEPOT_LAT, DEPOT_LON)
+        # ====================================================================
+        
+        # Mensagem de sucesso com info de otimização
+        optimization_text = f"🎯 *Rota Otimizada:* {optimized_count} pacotes\n" if optimized_count > 0 else ""
+        
         # Pergunta se quer fazer scraping
         keyboard = [['Sim', 'Não']]
         await update.message.reply_text(
             f"✅ *Pacotes Importados!*\n\n"
             f"🆔 ID da Rota: `{route.id}`\n"
-            f"📦 Total de Pacotes: *{len(items)}*\n\n"
+            f"📦 Total de Pacotes: *{len(items)}*\n" + f"{optimization_text}\n"
             f"� *Deseja extrair telefones do app SPX?*\n\n"
             f"⚠️ _Você precisará ter o celular conectado via USB com o app SPX aberto._",
             reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
@@ -2391,3 +2509,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

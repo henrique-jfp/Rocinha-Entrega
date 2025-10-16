@@ -95,6 +95,7 @@ class Package(Base):
     # phone: Mapped[Optional[str]] = mapped_column(String(20))  # Phone number of recipient - DESABILITADO (precisa migração)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     raw_data: Mapped[Optional[dict]] = mapped_column(JSON)
+    order_in_route: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Ordem otimizada na rota
 
     # relationships
     route: Mapped[Route] = relationship(back_populates="packages")

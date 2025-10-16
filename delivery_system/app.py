@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
         packages = (
             db.query(Package)
             .filter(Package.route_id == route_id)
-            .order_by(Package.id.asc())
+            .order_by(Package.order_in_route.asc(), Package.id.asc())  # Ordena pela otimização TSP
             .all()
         )
         return [PackageOut.model_validate(p) for p in packages]
