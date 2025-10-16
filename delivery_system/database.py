@@ -41,7 +41,16 @@ engine = create_engine(
     pool_recycle=300         # recicla conexões a cada 5 minutos
 )
 
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+# Importante: expire_on_commit=False evita que os objetos sejam expirados após commit,
+# o que causava erros do tipo "Instance <X> is not bound to a Session" quando
+# acessávamos atributos depois de commits em diferentes pontos do código.
+SessionLocal = sessionmaker(
+    bind=engine,
+    autoflush=False,
+    autocommit=False,
+    future=True,
+    expire_on_commit=False,
+)
 
 
 # --- Models ---

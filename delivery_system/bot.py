@@ -2711,8 +2711,8 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Monta link do mapa interativo para continuar a rota
     map_url = None
     try:
-        if route_id is not None and driver and driver.id:
-            map_url = f"{BASE_URL}/map/{route_id}/{driver.id}"
+        if route_id is not None and driver and getattr(driver, "telegram_user_id", None):
+            map_url = f"{BASE_URL}/map/{route_id}/{driver.telegram_user_id}"
     except Exception:
         map_url = None
 
@@ -3230,9 +3230,8 @@ def build_application():
     )
     app.add_handler(delivery_conv)
     
-    # Handler genérico de /start (bem-vindo) deve vir APÓS o ConversationHandler acima,
-    # assim o deep link /start deliver_X será tratado pelo fluxo de entrega.
-    app.add_handler(CommandHandler("start", cmd_start))
+    # Obs: Não adicionamos outro handler de /start fora do ConversationHandler para evitar
+    # mensagens duplicadas e conflitos. O delivery_conv já captura /start.
 
     add_driver_conv = ConversationHandler(
         entry_points=[CommandHandler("cadastrardriver", add_driver_start)],
