@@ -52,6 +52,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 
 # Estados de conversa
+IMPORT_ASK_NAME = 9
 IMPORT_WAITING_FILE = 10
 IMPORT_ASK_SCRAPING = 11
 IMPORT_SCRAPING_READY = 12
@@ -246,29 +247,34 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🎯 *Central de Ajuda - Gerente*\n\n"
                 "📦 *Gestão de Rotas*\n"
                 "• `/importar` - Importa rotas de planilha Excel ou CSV\n"
+                "  _Agora você escolhe o nome da rota\\!_\n"
                 "• `/enviarrota` - Atribui uma rota a um motorista\n"
-                "  _Envia link do mapa interativo automaticamente_\n\n"
+                "  _Recebe link de rastreamento automaticamente_\n"
+                "• `/rastrear` - 🆕 *Rastreia rotas ativas em tempo real*\n"
+                "  _Veja motoristas em ação no mapa\\!_\n\n"
                 "👥 *Gestão de Equipe*\n"
                 "• `/cadastrardriver` - Cadastra um novo motorista\n"
-                "• `/drivers` - Lista todos os motoristas cadastrados\n\n"
+                "• `/drivers` - Lista motoristas \\(🟢 em rota / ⚪ disponível\\)\n"
+                "  _Clique em 🗺️ para rastrear ou 🗑️ para excluir_\n\n"
                 "💰 *Financeiro*\n"
                 "• `/registrardia` - Registra dados financeiros diários\n"
                 "  \\(KM rodados, combustível, ganhos, salários\\)\n"
                 "• `/relatorio` - 🤖 *Gera relatório com IA Gemini*\n"
                 "  _Análise inteligente de desempenho e finanças_\n\n"
-                "�️ *Acompanhamento em Tempo Real:*\n"
-                "• Mapa interativo atualiza a cada *30 segundos*\n"
-                "• Veja localização do motorista em tempo real\n"
-                "• Notificações quando pacotes são entregues\n"
-                "• Histórico completo de entregas com fotos\n\n"
-                "�🔧 *Utilitários*\n"
+                "🗺️ *Rastreamento em Tempo Real:*\n"
+                "• Mapa atualiza a cada *30 segundos* automaticamente\n"
+                "• Localização GPS do motorista \\(ponto azul\\)\n"
+                "• Status de cada pacote em tempo real\n"
+                "• Notificações de entregas concluídas\n"
+                "• Histórico completo com fotos\n\n"
+                "🔧 *Utilitários*\n"
                 "• `/meu_id` - Exibe seu Telegram ID\n"
                 "• `/help` - Mostra esta mensagem de ajuda\n\n"
                 "💡 *Dicas:*\n"
-                "✅ Importe rotas pela manhã antes de enviar\n"
-                "✅ Acompanhe motoristas pelo link do mapa\n"
-                "✅ Mantenha registros financeiros atualizados\n"
-                "✅ Fotos de entrega ficam salvas no sistema"
+                "✅ Nomeie suas rotas \\(ex: Zona Sul, Centro\\)\n"
+                "✅ Use /rastrear para acompanhar em tempo real\n"
+                "✅ Salve o link do mapa para acesso rápido\n"
+                "✅ Relatórios IA ajudam na tomada de decisão"
             )
         else:
             help_text = (
@@ -474,6 +480,118 @@ async def cmd_meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_rastrear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Permite gerente rastrear rotas ativas em tempo real"""
+    db = SessionLocal()
+    try:
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem rastrear rotas.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Busca rotas com motoristas atribuídos
+        routes = db.query(Route).filter(Route.assigned_to_id.isnot(None)).order_by(Route.created_at.desc()).all()
+        
+        if not routes:
+            await update.message.reply_text(
+                "📭 *Nenhuma Rota Ativa*\n\n"
+                "Não há rotas atribuídas a motoristas no momento.\n\n"
+                "Use /enviarrota para atribuir uma rota primeiro!",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Cria keyboard com rotas
+        keyboard = []
+        for route in routes[:20]:  # Limita a 20 rotas
+            driver = route.assigned_to
+            driver_name = driver.full_name or f"ID {driver.telegram_user_id}" if driver else "Sem motorista"
+            route_name = route.name or f"Rota {route.id}"
+            
+            # Conta pacotes
+            total = db.query(Package).filter(Package.route_id == route.id).count()
+            delivered = db.query(Package).filter(
+                Package.route_id == route.id,
+                Package.status == "delivered"
+            ).count()
+            
+            # Botão com informações da rota
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🗺️ {route_name} - {driver_name} ({delivered}/{total})",
+                    callback_data=f"track_route:{route.id}"
+                )
+            ])
+        
+        await update.message.reply_text(
+            "🗺️ *Rastreamento de Rotas*\n\n"
+            "Selecione uma rota para abrir o mapa de rastreamento:\n\n"
+            "_O mapa atualiza a cada 30 segundos automaticamente._",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
+async def on_track_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para abrir link de rastreamento"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("track_route:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        route = db.get(Route, route_id)
+        if not route or not route.assigned_to:
+            await query.answer("❌ Rota não encontrada!", show_alert=True)
+            return
+        
+        driver = route.assigned_to
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+        route_name = route.name or f"Rota {route.id}"
+        
+        # Gera link do mapa
+        map_link = f"{BASE_URL}/map/{route.id}/{driver.telegram_user_id}"
+        
+        # Conta status dos pacotes
+        total = db.query(Package).filter(Package.route_id == route.id).count()
+        delivered = db.query(Package).filter(
+            Package.route_id == route.id,
+            Package.status == "delivered"
+        ).count()
+        pending = total - delivered
+        
+        await query.edit_message_text(
+            f"🗺️ *Rastreamento em Tempo Real*\n\n"
+            f"📦 *Rota:* {route_name}\n"
+            f"👤 *Motorista:* {driver_name}\n\n"
+            f"📊 *Status:*\n"
+            f"• Pendentes: {pending}\n"
+            f"• Entregues: {delivered}\n"
+            f"• Total: {total}\n\n"
+            f"🔗 *Link do Mapa:*\n"
+            f"{map_link}\n\n"
+            f"✅ Atualização automática a cada 30 segundos\n"
+            f"📍 Ponto azul = localização do motorista\n\n"
+            f"_Clique no link acima para abrir o mapa!_",
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
 async def cmd_importar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
@@ -490,13 +608,40 @@ async def cmd_importar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
     
     await update.message.reply_text(
-        "📂 *Importar Nova Rota*\n\n"
-        "Envie um arquivo Excel (.xlsx) ou CSV (.csv) com as seguintes colunas:\n\n"
-        "• *Código de Rastreio* (obrigatório)\n"
-        "• *Endereço* (obrigatório)\n"
-        "• *Latitude* (opcional)\n"
-        "• *Longitude* (opcional)\n"
-        "• *Bairro* (opcional)\n\n"
+        "� *Importar Nova Rota*\n\n"
+        "Primeiro, me diga:\n\n"
+        "🏷️ *Qual é o nome desta rota?*\n\n"
+        "_Exemplo: Zona Sul, Centro, Barra, etc._",
+        parse_mode='Markdown'
+    )
+    return IMPORT_ASK_NAME
+
+
+async def handle_route_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe o nome da rota e pede o arquivo"""
+    route_name = update.message.text.strip()
+    
+    if not route_name or len(route_name) < 2:
+        await update.message.reply_text(
+            "⚠️ *Nome muito curto!*\n\n"
+            "Por favor, envie um nome com pelo menos 2 caracteres.",
+            parse_mode='Markdown'
+        )
+        return IMPORT_ASK_NAME
+    
+    # Salva o nome no contexto
+    context.user_data['route_name'] = route_name
+    
+    await update.message.reply_text(
+        f"✅ *Nome da Rota:* {route_name}\n\n"
+        "📂 *Agora envie o arquivo*\n\n"
+        "Formatos aceitos: Excel (.xlsx) ou CSV (.csv)\n\n"
+        "*Colunas necessárias:*\n"
+        "• Código de Rastreio (obrigatório)\n"
+        "• Endereço (obrigatório)\n"
+        "• Latitude (opcional)\n"
+        "• Longitude (opcional)\n"
+        "• Bairro (opcional)\n\n"
         "💡 _O sistema reconhece automaticamente os nomes das colunas._",
         parse_mode='Markdown'
     )
@@ -547,7 +692,8 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     db = SessionLocal()
     try:
-        route_name = f"📦 Rota {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+        # Pega o nome da rota do contexto (salvo em handle_route_name)
+        route_name = context.user_data.get('route_name', f"Rota {datetime.now().strftime('%d/%m/%Y %H:%M')}")
         route = Route(name=route_name)
         db.add(route)
         db.flush()
@@ -807,20 +953,33 @@ async def cmd_enviarrota(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.commit()
             count = db.query(Package).filter(Package.route_id == route.id).count()
             link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
+            route_name = route.name or f"Rota {route.id}"
+            driver_name = driver.full_name or f"ID {driver_tid}"
+            
             try:
+                # Envia para o motorista
                 await context.bot.send_message(
                     chat_id=driver_tid,
                     text=(
                         f"🎯 *Nova Rota Atribuída!*\n\n"
-                        f"📦 Total de Pacotes: *{count}*\n"
+                        f"📦 Rota: *{route_name}*\n"
+                        f"📊 Total de Pacotes: *{count}*\n"
                         f"🗺️ Mapa Interativo: [Clique Aqui]({link})\n\n"
                         f"💡 _Abra o mapa para ver todas as entregas e começar!_"
                     ),
                     parse_mode='Markdown'
                 )
+                
+                # Envia também para o gerente (para rastreamento)
                 await update.message.reply_text(
-                    f"✅ *Rota Enviada!*\n\n"
-                    f"O motorista recebeu a notificação com o link do mapa.",
+                    f"✅ *Rota Enviada com Sucesso!*\n\n"
+                    f"📦 *Rota:* {route_name}\n"
+                    f"👤 *Motorista:* {driver_name}\n"
+                    f"📊 *Pacotes:* {count}\n\n"
+                    f"🗺️ *Link de Rastreamento:*\n"
+                    f"{link}\n\n"
+                    f"💡 _Use este link para acompanhar em tempo real!_\n"
+                    f"_Atualização automática a cada 30 segundos._",
                     parse_mode='Markdown'
                 )
             except Exception:
@@ -1185,26 +1344,54 @@ async def list_drivers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Cria botões inline com opção de excluir
+    # Cria botões inline com opção de excluir e rastrear
     buttons = []
     for d in drivers:
         name = d.full_name or 'Sem nome'
         tid = d.telegram_user_id
-        buttons.append([
-            InlineKeyboardButton(
-                f"👤 {name} (ID: {tid})",
-                callback_data=f"driver_info:{d.id}"
-            ),
-            InlineKeyboardButton(
-                "🗑️",
-                callback_data=f"delete_driver:{d.id}"
-            )
-        ])
+        
+        # Verifica se motorista tem rota ativa
+        active_route = db.query(Route).filter(Route.assigned_to_id == d.id).first()
+        
+        if active_route:
+            # Motorista em rota - mostra botão de rastreamento
+            status_icon = "🟢"
+            route_name = active_route.name or f"Rota {active_route.id}"
+            
+            buttons.append([
+                InlineKeyboardButton(
+                    f"{status_icon} {name} - {route_name}",
+                    callback_data=f"driver_info:{d.id}"
+                ),
+                InlineKeyboardButton(
+                    "🗺️",
+                    callback_data=f"track_route:{active_route.id}"
+                ),
+                InlineKeyboardButton(
+                    "�️",
+                    callback_data=f"delete_driver:{d.id}"
+                )
+            ])
+        else:
+            # Motorista disponível - sem rastreamento
+            status_icon = "⚪"
+            
+            buttons.append([
+                InlineKeyboardButton(
+                    f"{status_icon} {name} (ID: {tid})",
+                    callback_data=f"driver_info:{d.id}"
+                ),
+                InlineKeyboardButton(
+                    "🗑️",
+                    callback_data=f"delete_driver:{d.id}"
+                )
+            ])
     
     keyboard = InlineKeyboardMarkup(buttons)
     await update.message.reply_text(
         f"👥 *Lista de Motoristas* \\({len(drivers)}\\)\n\n"
-        f"💡 _Clique em 🗑️ para excluir um motorista_",
+        f"� Em rota  \\|  ⚪ Disponível\n"
+        f"�️ Rastrear  \\|  🗑️ Excluir",
         reply_markup=keyboard,
         parse_mode='MarkdownV2'
     )
@@ -1824,6 +2011,7 @@ def build_application():
     import_conv = ConversationHandler(
         entry_points=[CommandHandler("importar", cmd_importar)],
         states={
+            IMPORT_ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_route_name)],
             IMPORT_WAITING_FILE: [MessageHandler(filters.Document.ALL, handle_import_file)],
             IMPORT_ASK_SCRAPING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_scraping_choice)],
             IMPORT_SCRAPING_READY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_scraping_start)],
@@ -1834,6 +2022,9 @@ def build_application():
     )
     app.add_handler(import_conv)
 
+    app.add_handler(CommandHandler("rastrear", cmd_rastrear))
+    app.add_handler(CallbackQueryHandler(on_track_route, pattern=r"^track_route:\d+$"))
+    
     app.add_handler(CommandHandler("enviarrota", cmd_enviarrota))
     app.add_handler(CallbackQueryHandler(on_select_route, pattern=r"^sel_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_select_driver, pattern=r"^sel_driver:\d+$"))
