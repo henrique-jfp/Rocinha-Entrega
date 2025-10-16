@@ -51,9 +51,14 @@ def create_app() -> FastAPI:
 
     @app.get("/route/{route_id}/packages", response_model=List[PackageOut])
     def get_route_packages(route_id: int, db=Depends(get_db_session)):
+        print(f"🔍 GET /route/{route_id}/packages - Buscando pacotes...")
+        
         route = db.query(Route).filter(Route.id == route_id).first()
         if not route:
+            print(f"❌ Rota {route_id} não encontrada!")
             raise HTTPException(status_code=404, detail="Route not found")
+        
+        print(f"✅ Rota encontrada: {route.name}")
         
         # Tenta ordenar por order_in_route, mas fallback para id se coluna não existir
         try:
@@ -63,7 +68,9 @@ def create_app() -> FastAPI:
                 .order_by(Package.order_in_route.asc(), Package.id.asc())
                 .all()
             )
-        except Exception:
+            print(f"✅ Usando ordenação por order_in_route")
+        except Exception as e:
+            print(f"⚠️ order_in_route não existe, usando fallback: {e}")
             # Fallback se order_in_route não existir no banco
             packages = (
                 db.query(Package)
@@ -72,7 +79,13 @@ def create_app() -> FastAPI:
                 .all()
             )
         
-        return [PackageOut.model_validate(p) for p in packages]
+        print(f"📦 {len(packages)} pacotes encontrados")
+        for p in packages[:3]:  # Mostra os 3 primeiros
+            print(f"  - {p.tracking_code}: lat={p.latitude}, lng={p.longitude}, status={p.status}")
+        
+        result = [PackageOut.model_validate(p) for p in packages]
+        print(f"✅ Retornando {len(result)} pacotes serializados")
+        return result
 
     @app.get("/map/{route_id}/{driver_id}", response_class=HTMLResponse)
     def map_page(route_id: int, driver_id: int, request: Request):

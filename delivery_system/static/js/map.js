@@ -396,10 +396,21 @@
 
   async function loadPackages(){
     const url = `${baseUrl}/route/${routeId}/packages`;
+    console.log('🔍 Carregando pacotes de:', url);
+    console.log('📦 RouteID:', routeId, 'DriverID:', driverId, 'BaseURL:', baseUrl);
+    
     try {
       const res = await fetch(url);
-      if(!res.ok) throw new Error('Erro ao carregar');
+      console.log('📡 Response status:', res.status, res.statusText);
+      
+      if(!res.ok) {
+        const errorText = await res.text();
+        console.error('❌ Erro HTTP:', res.status, errorText);
+        throw new Error(`Erro ${res.status}: ${errorText}`);
+      }
+      
       const data = await res.json();
+      console.log('✅ Dados recebidos:', data.length, 'pacotes', data);
 
       markersLayer.clearLayers();
       const list = document.getElementById('package-list');
@@ -412,6 +423,7 @@
 
       // Agrupa pacotes próximos
       const clusters = clusterPackages(data);
+      console.log('🗂️ Clusters criados:', clusters.length);
       let displayIndex = 0;
 
       clusters.forEach((cluster) => {
@@ -478,9 +490,12 @@
         
         showUpdateNotification(message, 'success');
       }
+      
+      console.log('✅ Pacotes carregados com sucesso!');
     } catch(err){
-      console.error('Erro:', err);
-      document.getElementById('counter').textContent = 'Erro ao carregar pacotes';
+      console.error('❌ Erro completo:', err);
+      console.error('❌ Stack:', err.stack);
+      document.getElementById('counter').textContent = `Erro ao carregar pacotes: ${err.message}`;
     }
   }
 
