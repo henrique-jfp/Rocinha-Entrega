@@ -576,20 +576,28 @@
     try {
       const ids = (a.getAttribute('data-ids') || '').split(',').map(x => Number(x)).filter(Boolean);
       if (!ids.length) return;
+      console.log('🚀 Criando token para IDs:', ids);
       // Cria token curto no backend
       const res = await fetch(`${baseUrl}/group-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ package_ids: ids })
       });
-      if (!res.ok) throw new Error('Falha ao gerar token');
+      console.log('📡 Resposta do /group-token:', res.status, res.statusText);
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('❌ Erro no /group-token:', errorText);
+        throw new Error('Falha ao gerar token');
+      }
       const { token } = await res.json();
+      console.log('✅ Token criado:', token);
       // Monta deep link curto
       const link = `https://t.me/${botUsername}?start=deliverg_${encodeURIComponent(token)}`;
+      console.log('🔗 Link gerado:', link);
       // Abre o Telegram
       window.open(link, '_blank', 'noopener');
     } catch (err) {
-      console.error('Erro ao criar token de grupo:', err);
+      console.error('❌ Erro ao criar token de grupo:', err);
       alert('Não foi possível abrir o Telegram. Tente novamente.');
     }
   });

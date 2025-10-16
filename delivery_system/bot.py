@@ -289,28 +289,41 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Quando o usuário clica no botão START do Telegram (após abrir t.me/bot?start=X),
     # o parâmetro vem na mensagem de texto /start X (não em args).
     args = context.args or []
+    print(f"DEBUG: context.args = {args}")
     if not args and update.message and update.message.text:
         # Fallback: extrai parâmetro da mensagem de texto "/start <param>"
         parts = update.message.text.strip().split(maxsplit=1)
+        print(f"DEBUG: update.message.text = '{update.message.text}'")
+        print(f"DEBUG: parts = {parts}")
         if len(parts) == 2:
             args = [parts[1]]
+            print(f"DEBUG: args from message = {args}")
     
     if args and len(args) >= 1:
         arg = args[0]
+        print(f"DEBUG: processing arg = '{arg}'")
         # Novo formato curto: deliverg_<token>
         if arg.startswith("deliverg_"):
             token = arg.split("deliverg_", 1)[1]
+            print(f"DEBUG: deliverg_ token = '{token}'")
             db = SessionLocal()
             try:
                 rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
+                print(f"DEBUG: LinkToken found = {rec is not None}")
+                if rec:
+                    print(f"DEBUG: rec.data = {rec.data}")
+                    print(f"DEBUG: rec.type = {rec.type}")
                 if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
                     context.user_data["deliver_package_ids"] = list(map(int, rec.data["ids"]))
+                    print(f"DEBUG: deliver_package_ids set to {context.user_data['deliver_package_ids']}")
                     keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
                     await update.message.reply_text(
                         "📦 Como será esta entrega?",
                         reply_markup=keyboard
                     )
                     return MODE_SELECT
+                else:
+                    print("DEBUG: Token not found or invalid data")
             finally:
                 db.close()
         if arg.startswith("deliver_group_"):
@@ -345,6 +358,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
     # Mensagem de boas-vindas personalizada (sem deep link)
+    print("DEBUG: Falling back to welcome message")
     if user.role == "manager":
         await update.message.reply_text(
             f"👋 Olá, *{u.first_name}*!\n\n"
@@ -360,8 +374,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     return ConversationHandler.END
-
-
 async def cmd_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /iniciar - Inicia entrega via deep link do mapa"""
     args = context.args or []
