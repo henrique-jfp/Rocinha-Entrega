@@ -66,7 +66,7 @@ PHOTO1, PHOTO2, NAME, DOC, NOTES = range(5)
 ADD_DRIVER_TID, ADD_DRIVER_NAME = range(10, 12)
 SEND_SELECT_ROUTE, SEND_SELECT_DRIVER = range(20, 22)
 CONFIG_CHANNEL_SELECT_DRIVER, CONFIG_CHANNEL_ENTER_ID = range(23, 25)
-CONFIG_HOME_LOCATION = 26  # Estado para configurar endereço de casa
+CONFIG_HOME_SELECT_DRIVER, CONFIG_HOME_LOCATION = range(26, 28)  # Estados para configurar casa
 
 # Estados financeiros (APENAS MANAGERS)
 FIN_KM, FIN_FUEL_YN, FIN_FUEL_TYPE, FIN_FUEL_LITERS, FIN_FUEL_AMOUNT = range(30, 35)
@@ -747,6 +747,20 @@ Gere o relatório agora:"""
         db.close()
 
 
+async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando universal para cancelar qualquer operação em andamento"""
+    # Limpa todos os dados do contexto do usuário
+    context.user_data.clear()
+    
+    await update.message.reply_text(
+        "❌ *Operação Cancelada*\n\n"
+        "Todas as ações em andamento foram canceladas.\n\n"
+        "Use /help para ver os comandos disponíveis.",
+        parse_mode='Markdown'
+    )
+    return ConversationHandler.END
+
+
 async def cmd_meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Detecta se é canal, grupo ou chat privado
     chat = update.effective_chat
@@ -1079,68 +1093,158 @@ async def on_config_channel_enter_id(update: Update, context: ContextTypes.DEFAU
 # ==================== CONFIGURAR ENDEREÇO DE CASA ====================
 
 async def cmd_configurarcasa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Motorista ou Manager configura endereço de casa (ponto de partida para rotas)"""
-    await update.message.reply_text(
-        "📍 *Configurar Endereço de Casa*\n\n"
-        "Para otimizar suas rotas, preciso saber seu ponto de partida!\n\n"
-        "📲 *Envie sua localização:*\n"
-        "1. Clique no 📎 (anexo)\n"
-        "2. Escolha *'Localização'*\n"
-        "3. Envie sua *localização atual* ou *procure seu endereço*\n\n"
-        "💡 *Isso permite:*\n"
-        "• Rotas otimizadas a partir da SUA casa\n"
-        "• Menos km rodados = economia de combustível\n"
-        "• Sequência de entregas mais eficiente\n\n"
-        "Ou envie *CANCELAR* para desistir.",
-        parse_mode='Markdown'
-    )
-    return CONFIG_HOME_LOCATION
+    """Manager configura endereço de casa de um motorista, ou motorista configura o próprio"""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_user_id == update.effective_user.id).first()
+        if not user:
+            await update.message.reply_text("❌ Usuário não encontrado. Use /start primeiro!")
+            return ConversationHandler.END
+        
+        # Se for MOTORISTA, vai direto para enviar localização
+        if user.role == "driver":
+            await update.message.reply_text(
+                "📍 *Configurar Seu Endereço de Casa*\n\n"
+                "Para otimizar suas rotas, preciso saber seu ponto de partida!\n\n"
+                "📲 *Envie sua localização:*\n"
+                "1. Clique no 📎 (anexo)\n"
+                "2. Escolha *'Localização'*\n"
+                "3. Envie sua *localização atual* ou *procure seu endereço*\n\n"
+                "💡 *Isso permite:*\n"
+                "• Rotas otimizadas a partir da SUA casa\n"
+                "• Menos km rodados = economia de combustível\n"
+                "• Sequência de entregas mais eficiente\n\n"
+                "Use /cancelar para desistir.",
+                parse_mode='Markdown'
+            )
+            # Salva que é configuração própria
+            context.user_data['config_home_driver_id'] = user.id
+            return CONFIG_HOME_LOCATION
+        
+        # Se for MANAGER, lista motoristas para escolher
+        drivers = db.query(User).filter(User.role == "driver").all()
+        if not drivers:
+            await update.message.reply_text(
+                "📭 *Nenhum Motorista Cadastrado*\n\n"
+                "Use /cadastrardriver primeiro!",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
+        keyboard = []
+        for driver in drivers:
+            driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+            has_home = "🏠" if driver.home_latitude else "⚪"
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{has_home} {driver_name}",
+                    callback_data=f"config_home:{driver.id}"
+                )
+            ])
+        
+        await update.message.reply_text(
+            "👥 *Configurar Casa do Motorista*\n\n"
+            "Selecione o motorista para configurar o endereço:\n\n"
+            "🏠 = já configurado\n"
+            "⚪ = não configurado\n\n"
+            "Use /cancelar para desistir.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        return CONFIG_HOME_SELECT_DRIVER
+        
+    finally:
+        db.close()
+
+
+async def on_config_home_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manager selecionou um motorista para configurar casa"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("config_home:"):
+        return ConversationHandler.END
+    
+    driver_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        driver = db.get(User, driver_id)
+        if not driver:
+            await query.edit_message_text("❌ Motorista não encontrado!")
+            return ConversationHandler.END
+        
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+        
+        # Salva qual motorista está sendo configurado
+        context.user_data['config_home_driver_id'] = driver_id
+        
+        await query.edit_message_text(
+            f"📍 *Configurar Casa: {driver_name}*\n\n"
+            f"Agora envie a localização da casa do motorista.\n\n"
+            f"📲 *Como enviar:*\n"
+            f"1. Clique no 📎 (anexo)\n"
+            f"2. Escolha *'Localização'*\n"
+            f"3. Envie a localização ou procure o endereço\n\n"
+            f"💡 Você pode compartilhar a localização salva ou buscar um endereço específico.\n\n"
+            f"Use /cancelar para desistir.",
+            parse_mode='Markdown'
+        )
+        return CONFIG_HOME_LOCATION
+        
+    finally:
+        db.close()
 
 
 async def on_config_home_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe a localização e salva"""
-    if update.message.text and update.message.text.upper() == "CANCELAR":
-        await update.message.reply_text(
-            "❌ *Configuração Cancelada*",
-            parse_mode='Markdown'
-        )
-        return ConversationHandler.END
-    
+    """Recebe a localização e salva no motorista"""
     if not update.message.location:
         await update.message.reply_text(
             "⚠️ *Por favor, envie uma localização!*\n\n"
             "Use o botão de anexo 📎 → Localização\n\n"
-            "Ou envie *CANCELAR* para desistir.",
+            "Use /cancelar para desistir.",
             parse_mode='Markdown'
         )
         return CONFIG_HOME_LOCATION
     
     location = update.message.location
+    driver_id = context.user_data.get('config_home_driver_id')
+    
+    if not driver_id:
+        await update.message.reply_text("❌ Erro: Motorista não identificado!")
+        return ConversationHandler.END
+    
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.telegram_user_id == update.effective_user.id).first()
-        if not user:
-            await update.message.reply_text("❌ Usuário não encontrado!")
+        driver = db.get(User, driver_id)
+        if not driver:
+            await update.message.reply_text("❌ Motorista não encontrado!")
             return ConversationHandler.END
         
         # Salva coordenadas
-        user.home_latitude = location.latitude
-        user.home_longitude = location.longitude
-        user.home_address = f"Lat: {location.latitude:.6f}, Lon: {location.longitude:.6f}"
+        driver.home_latitude = location.latitude
+        driver.home_longitude = location.longitude
+        driver.home_address = f"Lat: {location.latitude:.6f}, Lon: {location.longitude:.6f}"
         db.commit()
         
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+        
         await update.message.reply_text(
-            f"✅ *Endereço de Casa Configurado!*\n\n"
+            f"✅ *Casa Configurada: {driver_name}*\n\n"
             f"📍 *Localização:*\n"
             f"Latitude: `{location.latitude:.6f}`\n"
             f"Longitude: `{location.longitude:.6f}`\n\n"
             f"🎯 *A partir de agora:*\n"
-            f"• Suas rotas serão otimizadas partindo deste ponto\n"
-            f"• Sequência de entregas calculada para menor distância\n"
-            f"• Você pode alterar quando quiser com /configurarcasa\n\n"
-            f"💡 *Dica:* Atualize se mudar de endereço!",
+            f"• Rotas deste motorista serão otimizadas deste ponto\n"
+            f"• Sequência calculada para menor distância\n"
+            f"• Pode alterar quando quiser com /configurarcasa\n\n"
+            f"💡 *Dica:* Atualize se o motorista mudar de endereço!",
             parse_mode='Markdown'
         )
+        
+        # Limpa o contexto
+        context.user_data.pop('config_home_driver_id', None)
         return ConversationHandler.END
         
     finally:
@@ -2684,6 +2788,7 @@ def build_application():
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
+    app.add_handler(CommandHandler("cancelar", cmd_cancelar))  # Cancelar universal
 
     import_conv = ConversationHandler(
         entry_points=[CommandHandler("importar", cmd_importar)],
@@ -2693,7 +2798,7 @@ def build_application():
             IMPORT_ASK_SCRAPING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_scraping_choice)],
             IMPORT_SCRAPING_READY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_scraping_start)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
         name="import_conv",
         persistent=False,
     )
@@ -2708,7 +2813,7 @@ def build_application():
             CONFIG_CHANNEL_SELECT_DRIVER: [CallbackQueryHandler(on_config_channel_select, pattern=r"^config_channel:\d+$")],
             CONFIG_CHANNEL_ENTER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, on_config_channel_enter_id)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
         name="config_channel_conv",
         persistent=False,
     )
@@ -2718,12 +2823,14 @@ def build_application():
     config_home_conv = ConversationHandler(
         entry_points=[CommandHandler("configurarcasa", cmd_configurarcasa)],
         states={
+            CONFIG_HOME_SELECT_DRIVER: [
+                CallbackQueryHandler(on_config_home_select_driver, pattern=r"^config_home:\d+$")
+            ],
             CONFIG_HOME_LOCATION: [
                 MessageHandler(filters.LOCATION, on_config_home_location),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, on_config_home_location)
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
         name="config_home_conv",
         persistent=False,
     )
@@ -2747,7 +2854,7 @@ def build_application():
             DOC: [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_doc)],
             NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_notes)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
         name="delivery_conv",
         persistent=False,
     )
@@ -2759,7 +2866,7 @@ def build_application():
             ADD_DRIVER_TID: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_driver_tid)],
             ADD_DRIVER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_driver_name)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
         name="add_driver_conv",
         persistent=False,
     )
@@ -2783,7 +2890,7 @@ def build_application():
             FIN_EXPENSES: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_expenses)],
             FIN_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_notes)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
         name="financial_conv",
         persistent=False,
     )
