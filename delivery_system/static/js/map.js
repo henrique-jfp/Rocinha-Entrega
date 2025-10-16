@@ -7,9 +7,48 @@
 
   // Initialize map
   const map = L.map('map', { zoomControl: true });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  
+  // Camadas de mapas com melhor detalhamento
+  const baseLayers = {
+    "🗺️ Padrão": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }),
+    
+    "🛰️ Satélite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: '© Esri'
+    }),
+    
+    "🏙️ Detalhado": L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '© CARTO'
+    }),
+    
+    "🌃 Escuro": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '© CARTO'
+    })
+  };
+  
+  // Camada híbrida (satélite + labels)
+  const satelliteLayer = baseLayers["🛰️ Satélite"];
+  const labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
     maxZoom: 19,
-    attribution: '© OpenStreetMap'
+    attribution: '© CARTO'
+  });
+  
+  // Grupo para satélite + labels
+  const hybridLayer = L.layerGroup([satelliteLayer, labelsLayer]);
+  baseLayers["📍 Híbrido"] = hybridLayer;
+  
+  // Adiciona camada padrão detalhada (melhor para Rocinha)
+  baseLayers["🏙️ Detalhado"].addTo(map);
+  
+  // Adiciona controle de camadas no canto superior direito
+  L.control.layers(baseLayers, null, {
+    position: 'topright',
+    collapsed: false
   }).addTo(map);
 
   map.setView([-22.9, -43.2], 12);
@@ -79,47 +118,80 @@
   // Custom icon com número
   function createNumberedIcon(number, status, isCluster = false){
     let bgColor = '#6366f1'; // pending
-    if(status === 'delivered') bgColor = '#10b981';
-    if(status === 'failed') bgColor = '#ef4444';
+    let shadowColor = 'rgba(99, 102, 241, 0.4)';
+    if(status === 'delivered') {
+      bgColor = '#10b981';
+      shadowColor = 'rgba(16, 185, 129, 0.4)';
+    }
+    if(status === 'failed') {
+      bgColor = '#ef4444';
+      shadowColor = 'rgba(239, 68, 68, 0.4)';
+    }
     
-    // Se for cluster, usa cor diferente e adiciona badge
-    const size = isCluster ? 50 : 40;
-    const fontSize = isCluster ? '16px' : '14px';
-    const clusterBadge = isCluster ? `<div style="
-      position: absolute;
-      top: -8px;
-      right: -8px;
-      background: #f59e0b;
-      color: white;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: 700;
-      border: 2px solid white;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    ">${number}</div>` : '';
+    // Se for cluster, usa design moderno
+    if (isCluster) {
+      const html = `<div style="position: relative;">
+        <div style="
+          width: 56px;
+          height: 56px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, ${bgColor} 0%, ${bgColor}dd 100%);
+          color: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 800;
+          font-size: 18px;
+          box-shadow: 0 4px 12px ${shadowColor}, 0 0 0 4px white, 0 0 0 6px ${bgColor}33;
+          border: 3px solid #fff;
+        ">
+          📦
+        </div>
+        <div style="
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          background: #f59e0b;
+          color: white;
+          min-width: 24px;
+          height: 24px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: 700;
+          padding: 0 6px;
+          border: 3px solid white;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        ">${number}</div>
+      </div>`;
+      
+      return L.divIcon({
+        html: html,
+        className: '',
+        iconSize: [56, 56],
+        iconAnchor: [28, 56]
+      });
+    }
     
+    // Marcador individual moderno com gradiente
     const html = `<div style="position: relative;">
       <div style="
-        width: ${size}px;
-        height: ${size}px;
+        width: 44px;
+        height: 44px;
         border-radius: 50% 50% 50% 0;
-        background: ${bgColor};
+        background: linear-gradient(135deg, ${bgColor} 0%, ${bgColor}dd 100%);
         color: #fff;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-weight: 700;
-        font-size: ${fontSize};
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        font-weight: 800;
+        font-size: 16px;
+        box-shadow: 0 4px 12px ${shadowColor}, 0 0 0 3px white;
         border: 3px solid #fff;
         transform: rotate(-45deg);
-      "><span style="transform: rotate(45deg);">${isCluster ? '📦' : number}</span></div>
-      ${clusterBadge}
+      "><span style="transform: rotate(45deg); text-shadow: 0 1px 2px rgba(0,0,0,0.3);">${number}</span></div>
     </div>`;
     
     return L.divIcon({
