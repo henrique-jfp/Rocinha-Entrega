@@ -480,12 +480,35 @@ Gere o relatório agora:"""
 
 
 async def cmd_meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"🆔 *Seu Telegram ID*\n\n"
-        f"ID: `{update.effective_user.id}`\n\n"
-        f"_Copie este número se o gerente solicitar._",
-        parse_mode='Markdown'
-    )
+    # Detecta se é canal, grupo ou chat privado
+    chat = update.effective_chat
+    user_id = update.effective_user.id
+    
+    if chat.type == "private":
+        # Chat privado - mostra ID do usuário
+        await update.message.reply_text(
+            f"🆔 *Seu Telegram ID*\n\n"
+            f"ID: `{user_id}`\n\n"
+            f"_Copie este número se o gerente solicitar._",
+            parse_mode='Markdown'
+        )
+    elif chat.type == "channel":
+        # Canal - mostra ID do canal
+        await update.message.reply_text(
+            f"📢 *ID deste Canal*\n\n"
+            f"ID do Canal: `{chat.id}`\n\n"
+            f"✅ *Use este ID no comando /configurarcanal*\n\n"
+            f"_Copie o número acima (incluindo o `-`)_",
+            parse_mode='Markdown'
+        )
+    elif chat.type in ["group", "supergroup"]:
+        # Grupo - mostra ID do grupo
+        await update.message.reply_text(
+            f"👥 *ID deste Grupo*\n\n"
+            f"ID do Grupo: `{chat.id}`\n\n"
+            f"_Você também pode usar grupos para provas de entrega!_",
+            parse_mode='Markdown'
+        )
 
 
 async def cmd_rastrear(update: Update, context: ContextTypes.DEFAULT_TYPE):
