@@ -2661,11 +2661,12 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Monta resumo: suporta múltiplos pacotes
         if pkg_ids:
             codes = [c for c in delivered_codes if c]
-            codes_preview = ", ".join(codes[:6]) + (f" +{len(codes)-6}" if len(codes) > 6 else "")
+            codes_list = ", ".join(codes)  # Todos os códigos sem abreviação
             summary = (
                 f"✅ Entregas Concluídas!\n\n"
                 f"Motorista: {driver_name}\n"
-                f"Pacotes: {len(delivered_ids)} ({codes_preview})\n"
+                f"Pacotes: {len(delivered_ids)}\n"
+                f"Códigos: {codes_list}\n"
                 f"Endereço: {primary_addr or '-'}\n"
                 f"Bairro: {primary_neighborhood or '-'}\n"
                 f"Recebedor: {receiver_name}\n"
