@@ -6,15 +6,17 @@
   const baseUrl = body.getAttribute('data-base-url') || '';
 
   // Initialize map with detailed CARTO Voyager layer (best for Rocinha)
-  const map = L.map('map', { zoomControl: true });
+  const map = L.map('map', {
+    center: [-22.9, -43.2],
+    zoom: 12,
+    zoomControl: true
+  });
   
   // Usa apenas camada detalhada CARTO Voyager - melhor visualização para Rocinha
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap, © CARTO'
   }).addTo(map);
-
-  map.setView([-22.9, -43.2], 12);
 
   const markersLayer = L.layerGroup().addTo(map);
   const myLocationLayer = L.layerGroup().addTo(map);
