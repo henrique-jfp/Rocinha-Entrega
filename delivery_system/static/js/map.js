@@ -174,10 +174,8 @@
   function createPopupHtml(pkg){
     const nav = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
     
-    // Link de entrega via deep link padrão do Telegram (sempre aciona /start com parâmetro)
-    // O /start do bot detecta "deliver_" e inicia diretamente o fluxo de fotos (PHOTO1)
-    const deliverTelegram = `tg://resolve?domain=${botUsername}&start=deliver_${pkg.id}`;
-    const deliverWeb = `https://t.me/${botUsername}?start=deliver_${pkg.id}`;
+    // Link de entrega via comando /entrega dedicado
+    const deliverWeb = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
     
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';
@@ -211,7 +209,7 @@
     };
     
     const packagesList = packages.map(pkg => {
-      const deliverWeb = `https://t.me/${botUsername}?start=deliver_${pkg.id}`;
+      const deliverWeb = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
       const emoji = getStatusEmoji(pkg.status);
       const statusText = getStatusText(pkg.status);
       const addr = (pkg.address || 'Sem endereço').substring(0, 50);
@@ -591,8 +589,8 @@
       }
       const { token } = await res.json();
       console.log('✅ Token criado:', token);
-      // Monta deep link curto
-      const link = `https://t.me/${botUsername}?start=deliverg_${encodeURIComponent(token)}`;
+      // Monta deep link curto usando comando /entrega
+      const link = `https://t.me/${botUsername}?start=entrega_deliverg_${encodeURIComponent(token)}`;
       console.log('🔗 Link gerado:', link);
       // Abre o Telegram
       window.open(link, '_blank', 'noopener');

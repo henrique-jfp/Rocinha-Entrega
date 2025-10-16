@@ -442,6 +442,113 @@ async def cmd_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     return ConversationHandler.END
+
+
+async def cmd_entrega(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /entrega - Inicia fluxo de entrega (grupos ou único pacote)"""
+    args = context.args or []
+    print(f"DEBUG /entrega: context.args = {args}")
+    
+    if not args and update.message and update.message.text:
+        # Fallback: extrai parâmetro da mensagem de texto "/entrega <param>"
+        parts = update.message.text.strip().split(maxsplit=1)
+        print(f"DEBUG /entrega: update.message.text = '{update.message.text}'")
+        print(f"DEBUG /entrega: parts = {parts}")
+        if len(parts) == 2:
+            args = [parts[1]]
+            print(f"DEBUG /entrega: args from message = {args}")
+    
+    if args and len(args) >= 1:
+        arg = args[0]
+        print(f"DEBUG /entrega: processing arg = '{arg}'")
+        
+        # Formato especial do deep link: entrega_deliverg_<token> ou entrega_deliver_<id>
+        # O Telegram adiciona "entrega_" como prefixo quando usa /start com parâmetro
+        if arg.startswith("entrega_"):
+            arg = arg[8:]  # Remove "entrega_" prefix
+            print(f"DEBUG /entrega: removed prefix, now arg = '{arg}'")
+        
+        # Formato token curto: deliverg_<token>
+        if arg.startswith("deliverg_"):
+            token = arg.split("deliverg_", 1)[1]
+            print(f"DEBUG /entrega: deliverg_ token = '{token}'")
+            db = SessionLocal()
+            try:
+                rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
+                print(f"DEBUG /entrega: LinkToken found = {rec is not None}")
+                if rec:
+                    print(f"DEBUG /entrega: rec.data = {rec.data}")
+                    print(f"DEBUG /entrega: rec.type = {rec.type}")
+                if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
+                    context.user_data["deliver_package_ids"] = list(map(int, rec.data["ids"]))
+                    print(f"DEBUG /entrega: deliver_package_ids set to {context.user_data['deliver_package_ids']}")
+                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
+                    await update.message.reply_text(
+                        "📦 *Entrega Múltipla*\n\n"
+                        f"🎯 {len(context.user_data['deliver_package_ids'])} pacotes selecionados\n\n"
+                        "Como será esta entrega?",
+                        reply_markup=keyboard,
+                        parse_mode='Markdown'
+                    )
+                    return MODE_SELECT
+                else:
+                    print("DEBUG /entrega: Token not found or invalid data")
+                    await update.message.reply_text(
+                        "❌ *Token Inválido*\n\n"
+                        "Este link de entrega expirou ou é inválido.\n\n"
+                        "Use o mapa interativo para gerar um novo link.",
+                        parse_mode='Markdown'
+                    )
+                    return ConversationHandler.END
+            finally:
+                db.close()
+        
+        # Formato legado: deliver_group_<id1>_<id2>_...
+        elif arg.startswith("deliver_group_"):
+            try:
+                ids_str = arg.split("deliver_group_", 1)[1]
+                ids = [int(x) for x in ids_str.split("_") if x.isdigit()]
+                if ids:
+                    context.user_data["deliver_package_ids"] = ids
+                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
+                    await update.message.reply_text(
+                        "📦 *Entrega Múltipla*\n\n"
+                        f"🎯 {len(ids)} pacotes selecionados\n\n"
+                        "Como será esta entrega?",
+                        reply_markup=keyboard,
+                        parse_mode='Markdown'
+                    )
+                    return MODE_SELECT
+            except Exception as e:
+                print(f"DEBUG /entrega: Error processing deliver_group_: {e}")
+                pass
+        
+        # Formato único: deliver_<id>
+        elif arg.startswith("deliver_"):
+            try:
+                package_id_str = arg.split("deliver_", 1)[1]
+                package_id = int(package_id_str)
+                context.user_data["deliver_package_id"] = package_id
+                keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
+                await update.message.reply_text(
+                    "📦 *Iniciar Entrega*\n\n"
+                    "Como será esta entrega?",
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+                return MODE_SELECT
+            except (ValueError, IndexError) as e:
+                print(f"DEBUG /entrega: Error processing deliver_: {e}")
+                pass
+    
+    # Se chamou /entrega sem parâmetros ou com parâmetro inválido
+    print("DEBUG /entrega: No valid args, showing error")
+    await update.message.reply_text(
+        "⚠️ *Comando Incorreto*\n\n"
+        "Use o botão *'Entregar'* no mapa interativo para iniciar uma entrega.\n\n"
+        "💡 Este comando é usado automaticamente quando você clica nos botões de entrega.",
+        parse_mode='Markdown'
+    )
     return ConversationHandler.END
 
 
@@ -3267,6 +3374,7 @@ def build_application():
     delivery_conv = ConversationHandler(
         entry_points=[
             CommandHandler("entregar", deliver_start),
+            CommandHandler("entrega", cmd_entrega),  # Novo comando dedicado para entregas
             CommandHandler("iniciar", cmd_iniciar),  # Deep link do mapa: /iniciar deliver_X
             CommandHandler("start", cmd_start),      # Deep link tradicional: /start deliver_X
         ],
@@ -3288,8 +3396,8 @@ def build_application():
     )
     app.add_handler(delivery_conv)
     
-    # Obs: Não adicionamos outro handler de /start fora do ConversationHandler para evitar
-    # mensagens duplicadas e conflitos. O delivery_conv já captura /start.
+    # Obs: /start também está no ConversationHandler para deep links, mas tem mensagem de
+    # boas-vindas como fallback quando não há parâmetros de entrega.
 
     add_driver_conv = ConversationHandler(
         entry_points=[CommandHandler("cadastrardriver", add_driver_start)],
