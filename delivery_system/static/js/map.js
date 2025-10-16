@@ -162,9 +162,9 @@
     return L.divIcon({
       html: html,
       className: 'custom-pin',
-      iconSize: [size, size],
-      iconAnchor: [size/2, size],
-      popupAnchor: [0, -size]
+      iconSize: [44, 44],
+      iconAnchor: [22, 44],
+      popupAnchor: [0, -44]
     });
   }
 
