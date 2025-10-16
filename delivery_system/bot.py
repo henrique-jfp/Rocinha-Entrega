@@ -67,6 +67,7 @@ PHOTO1, PHOTO2, NAME, DOC, NOTES = range(5)
 ADD_DRIVER_TID, ADD_DRIVER_NAME = range(10, 12)
 SEND_SELECT_ROUTE, SEND_SELECT_DRIVER = range(20, 22)
 CONFIG_CHANNEL_SELECT_DRIVER, CONFIG_CHANNEL_ENTER_ID = range(23, 25)
+CONFIG_HOME_LOCATION = 26  # Estado para configurar endereço de casa
 
 # Estados financeiros (APENAS MANAGERS)
 FIN_KM, FIN_FUEL_YN, FIN_FUEL_TYPE, FIN_FUEL_LITERS, FIN_FUEL_AMOUNT = range(30, 35)
@@ -365,7 +366,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• `/drivers` - Lista motoristas \\(🟢 em rota / ⚪ disponível\\)\n"
                 "  _Clique em 🗺️ para rastrear ou 🗑️ para excluir_\n"
                 "• `/configurarcanal` - 🆕 *Configura canal de entregas*\n"
-                "  _Provas vão para canal separado, sem poluição\\!_\n\n"
+                "  _Provas vão para canal separado, sem poluição\\!_\n"
+                "• `/configurarcasa` - 🏠 *Define endereço de casa do motorista*\n"
+                "  _Rotas otimizadas a partir da localização real\\!_\n\n"
                 "💰 *Financeiro*\n"
                 "• `/registrardia` - Registra dados financeiros diários\n"
                 "  \\(KM rodados, combustível, ganhos, salários\\)\n"
@@ -915,6 +918,77 @@ async def on_config_channel_enter_id(update: Update, context: ContextTypes.DEFAU
         db.close()
 
 
+# ==================== CONFIGURAR ENDEREÇO DE CASA ====================
+
+async def cmd_configurarcasa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Motorista ou Manager configura endereço de casa (ponto de partida para rotas)"""
+    await update.message.reply_text(
+        "📍 *Configurar Endereço de Casa*\n\n"
+        "Para otimizar suas rotas, preciso saber seu ponto de partida\\!\n\n"
+        "📲 *Envie sua localização:*\n"
+        "1\\. Clique no 📎 \\(anexo\\)\n"
+        "2\\. Escolha *'Localização'*\n"
+        "3\\. Envie sua *localização atual* ou *procure seu endereço*\n\n"
+        "💡 *Isso permite:*\n"
+        "• Rotas otimizadas a partir da SUA casa\n"
+        "• Menos km rodados = economia de combustível\n"
+        "• Sequência de entregas mais eficiente\n\n"
+        "Ou envie *CANCELAR* para desistir\\.",
+        parse_mode='MarkdownV2'
+    )
+    return CONFIG_HOME_LOCATION
+
+
+async def on_config_home_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe a localização e salva"""
+    if update.message.text and update.message.text.upper() == "CANCELAR":
+        await update.message.reply_text(
+            "❌ *Configuração Cancelada*",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
+    if not update.message.location:
+        await update.message.reply_text(
+            "⚠️ *Por favor, envie uma localização!*\n\n"
+            "Use o botão de anexo 📎 → Localização\n\n"
+            "Ou envie *CANCELAR* para desistir.",
+            parse_mode='Markdown'
+        )
+        return CONFIG_HOME_LOCATION
+    
+    location = update.message.location
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_user_id == update.effective_user.id).first()
+        if not user:
+            await update.message.reply_text("❌ Usuário não encontrado!")
+            return ConversationHandler.END
+        
+        # Salva coordenadas
+        user.home_latitude = location.latitude
+        user.home_longitude = location.longitude
+        user.home_address = f"Lat: {location.latitude:.6f}, Lon: {location.longitude:.6f}"
+        db.commit()
+        
+        await update.message.reply_text(
+            f"✅ *Endereço de Casa Configurado!*\n\n"
+            f"📍 *Localização:*\n"
+            f"Latitude: `{location.latitude:.6f}`\n"
+            f"Longitude: `{location.longitude:.6f}`\n\n"
+            f"🎯 *A partir de agora:*\n"
+            f"• Suas rotas serão otimizadas partindo deste ponto\n"
+            f"• Sequência de entregas calculada para menor distância\n"
+            f"• Você pode alterar quando quiser com /configurarcasa\n\n"
+            f"💡 *Dica:* Atualize se mudar de endereço!",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+        
+    finally:
+        db.close()
+
+
 async def cmd_importar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
@@ -1041,23 +1115,17 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data['import_tracking_codes'] = [it["tracking_code"] for it in items]
         context.user_data['import_package_count'] = len(items)
         
-        # ==================== OTIMIZAÇÃO AUTOMÁTICA DE ROTA ====================
-        # Busca todos os pacotes da rota recém-criada
-        all_packages = db.query(Package).filter(Package.route_id == route.id).all()
+        # NOTA: A otimização agora é feita no /enviarrota, após selecionar o motorista
         
-        # Otimiza a ordem usando TSP (Traveling Salesperson Problem)
-        optimized_count = optimize_route_packages(db, all_packages, DEPOT_LAT, DEPOT_LON)
-        # ====================================================================
+        # Pergunta se quer fazer scraping
         
-        # Mensagem de sucesso com info de otimização
-        optimization_text = f"🎯 *Rota Otimizada:* {optimized_count} pacotes\n" if optimized_count > 0 else ""
         
         # Pergunta se quer fazer scraping
         keyboard = [['Sim', 'Não']]
         await update.message.reply_text(
             f"✅ *Pacotes Importados!*\n\n"
             f"🆔 ID da Rota: `{route.id}`\n"
-            f"📦 Total de Pacotes: *{len(items)}*\n" + f"{optimization_text}\n"
+            f"📦 Total de Pacotes: *{len(items)}*\n\n" + f"💡 *A rota será otimizada quando você atribuir a um motorista*\n" + f"_(Use /enviarrota)_\n\n"
             f"� *Deseja extrair telefones do app SPX?*\n\n"
             f"⚠️ _Você precisará ter o celular conectado via USB com o app SPX aberto._",
             reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
@@ -1429,22 +1497,53 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.flush()
         route.assigned_to_id = driver.id
         db.commit()
+        
+        # ==================== OTIMIZAÇÃO DE ROTA POR MOTORISTA ====================
+        # Busca todos os pacotes da rota
+        all_packages = db.query(Package).filter(Package.route_id == route.id).all()
+        
+        # Usa o endereço de casa do motorista (se configurado) ou coordenadas padrão
+        start_lat = driver.home_latitude or DEPOT_LAT
+        start_lon = driver.home_longitude or DEPOT_LON
+        
+        # Otimiza a ordem usando TSP com o ponto de partida do motorista
+        optimized_count = optimize_route_packages(db, all_packages, start_lat, start_lon)
+        
+        # Mensagem sobre otimização
+        if driver.home_latitude and driver.home_longitude:
+            opt_msg = f"\n🎯 *Rota otimizada* a partir da casa do motorista!"
+        else:
+            opt_msg = f"\n⚠️ _Motorista sem endereço cadastrado\\. Use /configurarcasa\\._"
+        # ========================================================================
+        
         count = db.query(Package).filter(Package.route_id == route.id).count()
         link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
+        route_name = route.name or f"Rota {route.id}"
+        driver_name = driver.full_name or f"ID {driver_tid}"
+        
         try:
             await context.bot.send_message(
                 chat_id=driver_tid,
                 text=(
                     f"🎯 *Nova Rota Atribuída!*\n\n"
-                    f"📦 Total de Pacotes: *{count}*\n"
-                    f"🗺️ Mapa Interativo: [Clique Aqui]({link})\n\n"
+                    f"📦 Rota: *{route_name}*\n"
+                    f"📊 Total de Pacotes: *{count}*\n"
+                    f"🗺️ Mapa Interativo: [Clique Aqui]({link})\n"
+                    f"{opt_msg}\n\n"
                     f"💡 _Abra o mapa para ver todas as entregas e começar!_"
                 ),
-                parse_mode='Markdown'
+                parse_mode='Markdown',
+                disable_web_page_preview=True
             )
             await query.edit_message_text(
-                "✅ *Rota Enviada!*\n\n"
-                "O motorista recebeu a notificação com o link do mapa.",
+                f"✅ *Rota Enviada com Sucesso!*\n\n"
+                f"📦 *Rota:* {route_name}\n"
+                f"👤 *Motorista:* {driver_name}\n"
+                f"📊 *Pacotes:* {count}\n"
+                f"{opt_msg}\n\n"
+                f"🗺️ *Link de Rastreamento:*\n"
+                f"{link}\n\n"
+                f"💡 _Use este link para acompanhar em tempo real!_",
                 parse_mode='Markdown'
             )
         except Exception:
@@ -2438,6 +2537,21 @@ def build_application():
     )
     app.add_handler(config_channel_conv)
     
+    # Configurar endereço de casa (motorista ou manager)
+    config_home_conv = ConversationHandler(
+        entry_points=[CommandHandler("configurarcasa", cmd_configurarcasa)],
+        states={
+            CONFIG_HOME_LOCATION: [
+                MessageHandler(filters.LOCATION, on_config_home_location),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, on_config_home_location)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        name="config_home_conv",
+        persistent=False,
+    )
+    app.add_handler(config_home_conv)
+    
     app.add_handler(CommandHandler("enviarrota", cmd_enviarrota))
     app.add_handler(CallbackQueryHandler(on_select_route, pattern=r"^sel_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_select_driver, pattern=r"^sel_driver:\d+$"))
@@ -2509,4 +2623,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

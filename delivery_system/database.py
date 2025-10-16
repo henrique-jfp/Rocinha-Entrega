@@ -53,6 +53,11 @@ class User(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # 'manager' | 'driver'
     channel_id: Mapped[Optional[str]] = mapped_column(String(255))  # ID do canal para provas de entrega
+    
+    # Endereço de casa/ponto de partida do motorista (para otimização de rota)
+    home_latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    home_longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    home_address: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Endereço legível
 
     # relationships
     assigned_routes: Mapped[List["Route"]] = relationship(
