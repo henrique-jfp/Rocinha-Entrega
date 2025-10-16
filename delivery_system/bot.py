@@ -3263,8 +3263,13 @@ def build_application():
         try:
             err = context.error
             print(f"[ERROR] {err}")
-            # Opcionalmente, informa o usuário se houver contexto de mensagem
-            if isinstance(update, Update) and getattr(update, 'message', None):
+            # Não incomodar o usuário com conflitos de polling ou erros sem update
+            err_text = str(err) if err is not None else ""
+            conflict = "terminated by other getUpdates request" in err_text
+            if conflict or not isinstance(update, Update):
+                return
+            # Erro atrelado a uma mensagem do usuário -> resposta curta
+            if getattr(update, 'message', None):
                 try:
                     await update.message.reply_text("⚠️ Ocorreu um erro temporário. Tente novamente em instantes.")
                 except Exception:
