@@ -145,7 +145,9 @@ def create_app() -> FastAPI:
         token = secrets.token_urlsafe(10)  # ~14 chars
         rec = LinkToken(token=token, type="deliver_group", data={"ids": ids})
         db.add(rec)
-        # commit via dependency get_db_session
+        db.commit()  # IMPORTANTE: Commit para salvar no banco!
+        db.refresh(rec)  # Refresh para garantir que está salvo
+        print(f"✅ Token criado e salvo: {token} para IDs {ids}")
         return {"token": token}
 
     return app
