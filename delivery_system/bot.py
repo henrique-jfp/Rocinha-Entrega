@@ -2972,7 +2972,8 @@ def build_application():
     delivery_conv = ConversationHandler(
         entry_points=[
             CommandHandler("entregar", deliver_start),
-            CommandHandler("iniciar", cmd_iniciar)  # Deep link do mapa: /iniciar deliver_X
+            CommandHandler("iniciar", cmd_iniciar),  # Deep link do mapa: /iniciar deliver_X
+            CommandHandler("start", cmd_start),      # Deep link tradicional: /start deliver_X
         ],
         states={
             PHOTO1: [MessageHandler(filters.PHOTO, photo1)],
