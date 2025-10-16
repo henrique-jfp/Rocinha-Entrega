@@ -207,7 +207,7 @@
     };
     
     const packagesList = packages.map(pkg => {
-      const deliverWeb = `https://t.me/${botUsername}/iniciar?startapp=deliver_${pkg.id}`;
+      const deliverWeb = `https://t.me/${botUsername}?start=deliver_${pkg.id}`;
       const emoji = getStatusEmoji(pkg.status);
       const statusText = getStatusText(pkg.status);
       const addr = (pkg.address || 'Sem endereço').substring(0, 50);

@@ -281,7 +281,29 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     user = register_manager_if_first(u.id, u.full_name)
 
-    # Mensagem de boas-vindas personalizada
+    # Verifica se veio do mapa (deep link de entrega)
+    args = context.args or []
+    if args and len(args) >= 1:
+        arg = args[0]
+        if arg.startswith("deliver_"):
+            # Extrai o ID do pacote
+            try:
+                package_id_str = arg.split("deliver_", 1)[1]
+                package_id = int(package_id_str)
+                context.user_data["deliver_package_id"] = package_id
+                
+                # Inicia fluxo de fotos direto
+                await update.message.reply_text(
+                    "📸 *Vamos registrar sua entrega!*\n\n"
+                    "Por favor, envie a *primeira foto do pacote entregue*.\n\n"
+                    "_Dica: Tire uma foto clara do pacote com a etiqueta visível._",
+                    parse_mode='Markdown'
+                )
+                return PHOTO1
+            except (ValueError, IndexError):
+                pass
+
+    # Mensagem de boas-vindas personalizada (sem deep link)
     if user.role == "manager":
         await update.message.reply_text(
             f"👋 Olá, *{u.first_name}*!\n\n"
