@@ -4,10 +4,8 @@ from pathlib import Path
 from typing import Optional, List
 
 import pandas as pd
-import numpy as np
 import google.generativeai as genai
 from dotenv import load_dotenv
-from python_tsp.exact import solve_tsp_dynamic_programming
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -90,14 +88,15 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 def optimize_route_packages(db, packages: List[Package], start_lat: float, start_lon: float) -> int:
     """
-    Calcula a ordem otimizada (TSP) dos pacotes pendentes e atualiza o DB.
+    Calcula a ordem otimizada dos pacotes usando heurística Nearest Neighbor.
     Usa distância Haversine como métrica (melhor para caminhada/carro).
+    Algoritmo rápido O(n²) adequado para rotas com muitos pacotes.
     
     Args:
         db: Sessão do banco de dados
         packages: Lista de pacotes da rota
-        start_lat: Latitude do ponto de início (depot)
-        start_lon: Longitude do ponto de início (depot)
+        start_lat: Latitude do ponto de início (depot ou casa do motorista)
+        start_lon: Longitude do ponto de início (depot ou casa do motorista)
     
     Returns:
         Número de pacotes otimizados
@@ -118,58 +117,47 @@ def optimize_route_packages(db, packages: List[Package], start_lat: float, start
         db.commit()
         return 0
 
-    # 2. Criar lista de coordenadas (Depot + Pacotes)
-    coords = [(start_lat, start_lon)] + [
-        (p.latitude, p.longitude) for p in packages_to_optimize
-    ]
-    num_locations = len(coords)
+    # 2. HEURÍSTICA NEAREST NEIGHBOR (vizinho mais próximo)
+    # Muito mais rápido que TSP exato, adequado para 40+ pacotes
+    
+    unvisited = packages_to_optimize.copy()
+    current_lat, current_lon = start_lat, start_lon
+    optimized_order = []
+    
+    while unvisited:
+        # Encontrar pacote mais próximo da posição atual
+        nearest = min(
+            unvisited,
+            key=lambda p: haversine_distance(current_lat, current_lon, p.latitude, p.longitude)
+        )
+        optimized_order.append(nearest)
+        unvisited.remove(nearest)
+        current_lat, current_lon = nearest.latitude, nearest.longitude
 
-    # 3. Calcular Matriz de Custo usando Haversine
-    cost_matrix = np.zeros((num_locations, num_locations))
-    for i in range(num_locations):
-        for j in range(num_locations):
-            if i != j:
-                cost_matrix[i, j] = haversine_distance(
-                    coords[i][0], coords[i][1],
-                    coords[j][0], coords[j][1]
-                )
-
-    # 4. Resolver TSP (Depot é índice 0)
-    try:
-        permutation, distance = solve_tsp_dynamic_programming(cost_matrix)
-    except Exception as e:
-        print(f"⚠️ Erro ao otimizar rota: {e}")
-        # Fallback: manter ordem original
-        order = 1
-        for pkg in packages:
+    # 3. Atualizar ordem no banco de dados
+    order = 1
+    for pkg in optimized_order:
+        pkg.order_in_route = order
+        db.add(pkg)
+        order += 1
+    
+    # 4. Pacotes sem coordenadas vão para o final
+    for pkg in packages:
+        if pkg.order_in_route is None:
             pkg.order_in_route = order
             db.add(pkg)
             order += 1
-        db.commit()
-        return 0
-
-    # 5. Atualizar ordem no banco de dados
-    # permutation[0] é sempre o depot, ignoramos
-    # permutation[1:] contém os índices dos pacotes na ordem otimizada
-    new_order = 1
-    for idx in permutation[1:]:
-        # idx - 1 porque o depot está no índice 0 de coords
-        if idx > 0:  # Garantir que não é o depot
-            package_obj = packages_to_optimize[idx - 1]
-            package_obj.order_in_route = new_order
-            db.add(package_obj)
-            new_order += 1
-
-    # 6. Pacotes sem coordenadas vão para o final
-    for pkg in packages:
-        if pkg.order_in_route is None:
-            pkg.order_in_route = new_order
-            db.add(pkg)
-            new_order += 1
 
     db.commit()
     
-    print(f"✅ Rota otimizada: {len(packages_to_optimize)} pacotes, distância total: {distance:.2f} km")
+    # Calcular distância total para log
+    total_distance = 0.0
+    current_lat, current_lon = start_lat, start_lon
+    for pkg in optimized_order:
+        total_distance += haversine_distance(current_lat, current_lon, pkg.latitude, pkg.longitude)
+        current_lat, current_lon = pkg.latitude, pkg.longitude
+    
+    print(f"✅ Rota otimizada: {len(packages_to_optimize)} pacotes, distância: {total_distance:.2f} km")
     return len(packages_to_optimize)
 
 
