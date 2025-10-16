@@ -51,7 +51,8 @@ DEPOT_LON = float(os.getenv("DEPOT_LON", "-43.248000"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
     genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-pro')
+    # Usar gemini-1.5-flash (mais rápido e gratuito) ou gemini-1.5-pro
+    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 else:
     gemini_model = None
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
