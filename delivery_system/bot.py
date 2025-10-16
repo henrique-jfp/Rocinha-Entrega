@@ -288,6 +288,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
     if args and len(args) >= 1:
         arg = args[0]
+        if arg.startswith("deliver_group_"):
+            try:
+                ids_str = arg.split("deliver_group_", 1)[1]
+                ids = [int(x) for x in ids_str.split("_") if x.isdigit()]
+                if ids:
+                    context.user_data["deliver_package_ids"] = ids
+                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
+                    await update.message.reply_text(
+                        "📦 Como será esta entrega?",
+                        reply_markup=keyboard
+                    )
+                    return MODE_SELECT
+            except Exception:
+                pass
         if arg.startswith("deliver_"):
             # Extrai o ID do pacote
             try:
@@ -329,6 +343,20 @@ async def cmd_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if args and len(args) == 1:
         # Aceita tanto "iniciar_deliver_X" quanto "deliver_X"
         arg = args[0]
+        if arg.startswith("deliver_group_"):
+            try:
+                ids_str = arg.split("deliver_group_", 1)[1]
+                ids = [int(x) for x in ids_str.split("_") if x.isdigit()]
+                if ids:
+                    context.user_data["deliver_package_ids"] = ids
+                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
+                    await update.message.reply_text(
+                        "📦 Como será esta entrega?",
+                        reply_markup=keyboard
+                    )
+                    return MODE_SELECT
+            except Exception:
+                pass
         if arg.startswith("iniciar_deliver_"):
             package_id_str = arg.split("iniciar_deliver_", 1)[1]
         elif arg.startswith("deliver_"):
@@ -2310,8 +2338,9 @@ async def recv_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pkg_ids = context.user_data.get("deliver_package_ids")
     pkg_id = context.user_data.get("deliver_package_id")
-    if not pkg_id:
+    if not pkg_id and not pkg_ids:
         await update.message.reply_text(
             "❌ *Erro Interno*\n\n"
             "Não foi possível identificar o pacote.\n\n"
@@ -2322,15 +2351,6 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = SessionLocal()
     try:
-        package = db.get(Package, int(pkg_id))
-        if not package:
-            await update.message.reply_text(
-                "❌ *Pacote Não Encontrado*\n\n"
-                f"O pacote ID `{pkg_id}` não existe.",
-                parse_mode='Markdown'
-            )
-            return ConversationHandler.END
-
         driver = get_user_by_tid(db, update.effective_user.id)
         # Persistimos ao menos a primeira foto de pacote (unitário ou em massa) + foto do local
         p1_for_db = context.user_data.get("photo1_file_id")
@@ -2338,19 +2358,61 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not p1_for_db and mass_list:
             p1_for_db = mass_list[0]
 
-        proof = DeliveryProof(
-            package_id=package.id,
-            driver_id=driver.id if driver else None,
-            receiver_name=context.user_data.get("receiver_name"),
-            receiver_document=context.user_data.get("receiver_document"),
-            notes=context.user_data.get("notes"),
-            # Armazena o file_id do Telegram nos campos existentes
-            photo1_path=p1_for_db,
-            photo2_path=context.user_data.get("photo2_file_id"),
-        )
-        db.add(proof)
-        package.status = "delivered"
-        db.commit()
+        route_id = None
+        delivered_packages_objs = []
+        receiver_name_val = context.user_data.get("receiver_name")
+        receiver_document_val = context.user_data.get("receiver_document")
+        notes_val = context.user_data.get("notes")
+
+        if pkg_ids:
+            # Entrega em grupo
+            packages = db.query(Package).filter(Package.id.in_(pkg_ids)).all()
+            if not packages:
+                await update.message.reply_text(
+                    "❌ *Pacotes Não Encontrados*",
+                    parse_mode='Markdown'
+                )
+                return ConversationHandler.END
+            route_id = packages[0].route_id if packages else None
+            for p in packages:
+                proof = DeliveryProof(
+                    package_id=p.id,
+                    driver_id=driver.id if driver else None,
+                    receiver_name=receiver_name_val,
+                    receiver_document=receiver_document_val,
+                    notes=notes_val,
+                    photo1_path=p1_for_db,
+                    photo2_path=context.user_data.get("photo2_file_id"),
+                )
+                db.add(proof)
+                p.status = "delivered"
+                delivered_packages_objs.append(p)
+            db.commit()
+            package = delivered_packages_objs[0]
+        else:
+            # Entrega unitária
+            package = db.get(Package, int(pkg_id))
+            if not package:
+                await update.message.reply_text(
+                    "❌ *Pacote Não Encontrado*\n\n"
+                    f"O pacote ID `{pkg_id}` não existe.",
+                    parse_mode='Markdown'
+                )
+                return ConversationHandler.END
+            route_id = package.route_id
+            proof = DeliveryProof(
+                package_id=package.id,
+                driver_id=driver.id if driver else None,
+                receiver_name=receiver_name_val,
+                receiver_document=receiver_document_val,
+                notes=notes_val,
+                photo1_path=p1_for_db,
+                photo2_path=context.user_data.get("photo2_file_id"),
+            )
+            db.add(proof)
+            package.status = "delivered"
+            delivered_packages_objs = [package]
+            db.commit()
 
     finally:
         db.close()
@@ -2358,10 +2420,11 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Notificar managers OU canal configurado do motorista
     try:
         db2 = SessionLocal()
-        package = db2.get(Package, int(pkg_id))
+        # Recarrega dados do pacote principal e driver
+        package = db2.get(Package, int(delivered_packages_objs[0].id))
         driver = get_user_by_tid(db2, update.effective_user.id)
-        # Captura route_id e nome da rota antes de fechar a sessão para evitar DetachedInstanceError
-        route_id = package.route_id if package else None
+        # Captura route_id e nome da rota
+        route_id = route_id if route_id is not None else (package.route_id if package else None)
         route_name = None
         if route_id is not None:
             try:
@@ -2396,17 +2459,33 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db_progress.close()
         
         # Mensagem formatada para o canal (sem asteriscos, mais limpo)
-        summary = (
-            f"✅ Entrega Concluída!\n\n"
-            f"Motorista: {driver_name}\n"
-            f"Pacote: {package.tracking_code}\n"
-            f"Endereço: {package.address or '-'}\n"
-            f"Bairro: {package.neighborhood or '-'}\n"
-            f"Recebedor: {receiver_name}\n"
-            f"Documento: {receiver_doc}\n"
-            f"Observações: {notes}\n"
-            f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
-        )
+        # Monta resumo: suporta múltiplos pacotes
+        if pkg_ids:
+            codes = [p.tracking_code for p in delivered_packages_objs if getattr(p, 'tracking_code', None)]
+            codes_preview = ", ".join(codes[:6]) + (f" +{len(codes)-6}" if len(codes) > 6 else "")
+            summary = (
+                f"✅ Entregas Concluídas!\n\n"
+                f"Motorista: {driver_name}\n"
+                f"Pacotes: {len(delivered_packages_objs)} ({codes_preview})\n"
+                f"Endereço: {package.address or '-'}\n"
+                f"Bairro: {package.neighborhood or '-'}\n"
+                f"Recebedor: {receiver_name}\n"
+                f"Documento: {receiver_doc}\n"
+                f"Observações: {notes}\n"
+                f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+            )
+        else:
+            summary = (
+                f"✅ Entrega Concluída!\n\n"
+                f"Motorista: {driver_name}\n"
+                f"Pacote: {package.tracking_code}\n"
+                f"Endereço: {package.address or '-'}\n"
+                f"Bairro: {package.neighborhood or '-'}\n"
+                f"Recebedor: {receiver_name}\n"
+                f"Documento: {receiver_doc}\n"
+                f"Observações: {notes}\n"
+                f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+            )
         
         # Mensagem de progresso
         progress_message = (

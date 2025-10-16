@@ -40,43 +40,46 @@
     return R * c; // Distância em metros
   }
 
-  // Agrupa pacotes próximos (raio de 16 metros)
+  // Normaliza o endereço em uma chave: "rua + número" (ignora complemento)
+  function normalizeAddressKey(address) {
+    if (!address) return null;
+    let a = (address + '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+    // captura número principal (primeira sequência de dígitos)
+    const numMatch = a.match(/(\d{1,6})/);
+    if (!numMatch) return null;
+    const number = numMatch[1];
+    // parte da rua antes do número (ou até a vírgula)
+    const beforeNum = a.split(number)[0] || a.split(',')[0] || a;
+    const street = beforeNum.replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!street || !number) return null;
+    return `${street} ${number}`;
+  }
+
+  // Agrupa pacotes por endereço (mesmo número); fallback: itens sem endereço ficam sozinhos
   function clusterPackages(packages) {
-    const CLUSTER_RADIUS = 16; // metros
+    const groups = new Map();
+    const singles = [];
+    for (const pkg of packages) {
+      const key = normalizeAddressKey(pkg.address);
+      if (!key || !pkg.latitude || !pkg.longitude) {
+        singles.push(pkg);
+        continue;
+      }
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(pkg);
+    }
+
     const clusters = [];
-    const processed = new Set();
-
-    packages.forEach((pkg, index) => {
-      if (processed.has(index) || !pkg.latitude || !pkg.longitude) return;
-
-      const cluster = {
-        packages: [pkg],
-        lat: pkg.latitude,
-        lng: pkg.longitude,
-        indices: [index]
-      };
-
-      // Procura outros pacotes próximos
-      packages.forEach((otherPkg, otherIndex) => {
-        if (otherIndex === index || processed.has(otherIndex)) return;
-        if (!otherPkg.latitude || !otherPkg.longitude) return;
-
-        const distance = getDistance(
-          pkg.latitude, pkg.longitude,
-          otherPkg.latitude, otherPkg.longitude
-        );
-
-        if (distance <= CLUSTER_RADIUS) {
-          cluster.packages.push(otherPkg);
-          cluster.indices.push(otherIndex);
-          processed.add(otherIndex);
-        }
-      });
-
-      processed.add(index);
-      clusters.push(cluster);
-    });
-
+    // Converte grupos em clusters
+    for (const [key, list] of groups.entries()) {
+      const lat = list[0].latitude;
+      const lng = list[0].longitude;
+      clusters.push({ packages: list, lat, lng, key });
+    }
+    // Cada single vira um cluster próprio
+    for (const p of singles) {
+      clusters.push({ packages: [p], lat: p.latitude, lng: p.longitude, key: null });
+    }
     return clusters;
   }
 
@@ -244,6 +247,12 @@
         </div>
       `;
     }).join('');
+
+    // Link para entregar todos os pacotes deste endereço (ids concatenados)
+    const allIds = packages.filter(p => p.status === 'pending').map(p => p.id);
+    const groupLink = allIds.length > 0
+      ? `https://t.me/${botUsername}?start=deliver_group_${allIds.slice(0, 30).join('_')}`
+      : null;
     
     return `
       <div style="min-width: 280px; max-width: 320px;">
@@ -261,10 +270,14 @@
         <div style="max-height: 300px; overflow-y: auto;">
           ${packagesList}
         </div>
-        <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+        <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; flex-direction: column;">
           <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="width: 100%; text-align: center;">
-            🧭 Navegar para esta Parada
+            🧭 Navegar para este Endereço
           </a>
+          ${groupLink ? `
+          <a class="popup-btn deliver" href="${groupLink}" target="_blank" rel="noopener" style="width: 100%; text-align: center; background: #10b981; color: white;">
+            ✓ Entregar todos deste endereço
+          </a>` : ''}
         </div>
       </div>
     `;
