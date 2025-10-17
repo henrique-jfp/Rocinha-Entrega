@@ -3220,7 +3220,6 @@ def setup_bot_handlers(app: Application):
     )
     app.add_handler(config_home_conv)
     
-    app.add_handler(CommandHandler("enviarrota", cmd_enviarrota))
     app.add_handler(CallbackQueryHandler(on_select_route, pattern=r"^sel_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_select_driver, pattern=r"^sel_driver:\d+$"))
     app.add_handler(CallbackQueryHandler(on_delete_driver, pattern=r"^delete_driver:\d+$"))
