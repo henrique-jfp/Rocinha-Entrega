@@ -187,13 +187,38 @@
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';
     
+    // Botão de marcar entregue (apenas se pendente)
+    const markDeliveredBtn = pkg.status === 'pending' ? `
+      <button onclick="markPackageDelivered(${pkg.id})" style="
+        padding: 8px 12px;
+        background: #10b981;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+        flex: 1;
+      " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+        ✅ Marcar Entregue
+      </button>
+    ` : '';
+    
     return `
       <div>
         <div class="popup-code">${track}</div>
         <div class="popup-addr">${address}</div>
-        <div class="popup-actions">
-          <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener">🧭 Navegar</a>
-          <a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener">✓ Entregar</a>
+        <div style="
+          margin-top: 8px;
+          padding-top: 8px;
+          border-top: 1px solid #e5e7eb;
+          display: flex;
+          gap: 6px;
+          align-items: stretch;
+        ">
+          <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">🧭 Navegar</a>
+          ${markDeliveredBtn || `<a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">✓ Entregar</a>`}
         </div>
       </div>`;
   }
@@ -235,18 +260,29 @@
           <div style="font-size: 11px; color: #64748b; margin-bottom: 4px;">
             ${addr}${addr.length >= 50 ? '...' : ''}
           </div>
-          <div style="display: flex; gap: 4px; align-items: center;">
+          <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
             <span style="font-size: 10px; color: #94a3b8; font-weight: 600;">${statusText}</span>
             ${pkg.status === 'pending' ? `
+              <button onclick="markPackageDelivered(${pkg.id}); event.stopPropagation();" style="
+                font-size: 10px;
+                padding: 2px 6px;
+                background: #10b981;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.2s;
+              " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">✅ Marcar</button>
               <a href="${deliverWeb}" target="_blank" rel="noopener" style="
                 font-size: 10px;
-                padding: 2px 8px;
-                background: #10b981;
+                padding: 2px 6px;
+                background: #3b82f6;
                 color: white;
                 border-radius: 4px;
                 text-decoration: none;
                 font-weight: 600;
-              ">Entregar</a>
+              " title="Abre Telegram para entrega completa com fotos">Telegram</a>
             ` : ''}
           </div>
         </div>
