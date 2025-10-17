@@ -53,12 +53,22 @@ DEPOT_LON = float(os.getenv("DEPOT_LON", "-43.248000"))
 # Configurar Gemini API
 # Configurar Groq API (substitui Gemini)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+groq_client = None
+ai_model_name = None
+
 if GROQ_API_KEY:
-    groq_client = Groq(api_key=GROQ_API_KEY)
-    ai_model_name = "llama-3.1-70b-versatile"  # Modelo rápido e inteligente
+    try:
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        ai_model_name = "llama-3.1-70b-versatile"  # Modelo rápido e inteligente
+        print("✅ Groq API inicializada com sucesso")
+    except Exception as e:
+        print(f"⚠️ Erro ao inicializar Groq API: {e}")
+        print("ℹ️ Relatórios com IA estarão indisponíveis")
+        groq_client = None
+        ai_model_name = None
 else:
-    groq_client = None
-    ai_model_name = None
+    print("⚠️ GROQ_API_KEY não configurada")
+    
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 
