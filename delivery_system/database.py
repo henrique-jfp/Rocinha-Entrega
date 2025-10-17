@@ -150,7 +150,7 @@ class Expense(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     date: Mapped[datetime] = mapped_column(Date, nullable=False, index=True)
-    type: Mapped[str] = mapped_column(String(50), nullable=False)  # combustivel, salario, manutencao, outros
+    type: Mapped[str] = mapped_column(String(50), nullable=False)  # combustivel, salario, manutencao, pedagio, combustivel_outro, outro
     description: Mapped[str] = mapped_column(String(500), nullable=False)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     fuel_type: Mapped[Optional[str]] = mapped_column(String(50))  # gasolina, diesel, etanol (se type=combustivel)
@@ -160,7 +160,7 @@ class Expense(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        CheckConstraint("type in ('combustivel','salario','manutencao','outros')", name="ck_expense_type"),
+        CheckConstraint("type in ('combustivel','salario','manutencao','pedagio','combustivel_outro','outro')", name="ck_expense_type"),
     )
 
 
