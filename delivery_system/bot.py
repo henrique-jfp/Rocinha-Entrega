@@ -953,15 +953,24 @@ Gere o relatório agora:"""
                 
                 ai_analysis = response.choices[0].message.content
                 
-                # Salva no banco
-                report = AIReport(
-                    user_id=me.id,
-                    report_type="monthly_financial",
-                    prompt_data=prompt,
-                    ai_response=ai_analysis
-                )
-                db.add(report)
-                db.commit()
+                # Salva no banco (AIReport usa month/year, não user_id)
+                try:
+                    # Tenta salvar - se já existir relatório do mês, ignora erro de constraint
+                    report = AIReport(
+                        month=now.month,
+                        year=now.year,
+                        report_text=ai_analysis,
+                        total_income=total_income,
+                        total_expenses=total_expenses,
+                        total_km=total_mileage,
+                        created_by=me.telegram_user_id
+                    )
+                    db.add(report)
+                    db.commit()
+                except Exception as save_err:
+                    # Se falhar ao salvar (ex: constraint), apenas mostra o relatório
+                    print(f"Aviso ao salvar relatório: {save_err}")
+                    db.rollback()
                 
                 # Divide relatório em mensagens (limite Telegram: 4096 chars)
                 max_length = 4000
