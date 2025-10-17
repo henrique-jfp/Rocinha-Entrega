@@ -1156,57 +1156,73 @@ async def cmd_meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def cmd_rastrear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Permite gerente rastrear rotas ativas em tempo real"""
+
+
+async def cmd_rotas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gerencia todas as rotas: visualiza status, rastreia ativas e deleta se necessário"""
     db = SessionLocal()
     try:
         me = get_user_by_tid(db, update.effective_user.id)
         if not me or me.role != "manager":
             await update.message.reply_text(
                 "⛔ *Acesso Negado*\n\n"
-                "Apenas gerentes podem rastrear rotas.",
+                "Apenas gerentes podem gerenciar rotas.",
                 parse_mode='Markdown'
             )
             return
         
-        # Busca rotas com motoristas atribuídos
-        routes = db.query(Route).filter(Route.assigned_to_id.isnot(None)).order_by(Route.created_at.desc()).all()
+        # Busca todas as rotas com informações
+        routes = db.query(Route).order_by(Route.created_at.desc()).all()
         
         if not routes:
             await update.message.reply_text(
-                "📭 *Nenhuma Rota Ativa*\n\n"
-                "Não há rotas atribuídas a motoristas no momento.\n\n"
-                "Use /enviarrota para atribuir uma rota primeiro!",
+                "📭 *Nenhuma Rota Cadastrada*\n\n"
+                "Use /importar para criar uma nova rota primeiro!",
                 parse_mode='Markdown'
             )
             return
         
-        # Cria keyboard com rotas
+        # Cria keyboard com rotas e status
         keyboard = []
-        for route in routes[:20]:  # Limita a 20 rotas
-            driver = route.assigned_to
-            driver_name = driver.full_name or f"ID {driver.telegram_user_id}" if driver else "Sem motorista"
+        for route in routes[:30]:  # Limita a 30 rotas
             route_name = route.name or f"Rota {route.id}"
             
-            # Conta pacotes
-            total = db.query(Package).filter(Package.route_id == route.id).count()
-            delivered = db.query(Package).filter(
+            # Determina status
+            total_packages = db.query(Package).filter(Package.route_id == route.id).count()
+            delivered_packages = db.query(Package).filter(
                 Package.route_id == route.id,
                 Package.status == "delivered"
             ).count()
             
-            # Botão com informações da rota
+            if route.assigned_to_id:
+                if total_packages > 0 and delivered_packages == total_packages:
+                    status_emoji = "✅"  # Concluída
+                    status_text = "Concluída"
+                else:
+                    status_emoji = "🔴"  # Em rota
+                    status_text = "Em Rota"
+            else:
+                status_emoji = "⚪"  # Pendente
+                status_text = "Pendente"
+            
+            driver_name = ""
+            if route.assigned_to:
+                driver_name = f" - {route.assigned_to.full_name or f'ID {route.assigned_to.telegram_user_id}'}"
+            
             keyboard.append([
                 InlineKeyboardButton(
-                    text=f"🗺️ {route_name} - {driver_name} ({delivered}/{total})",
-                    callback_data=f"track_route:{route.id}"
+                    text=f"{status_emoji} {route_name}{driver_name} ({delivered_packages}/{total_packages})",
+                    callback_data=f"view_route:{route.id}"
                 )
             ])
         
         await update.message.reply_text(
-            "🗺️ *Rastreamento de Rotas*\n\n"
-            "Selecione uma rota para abrir o mapa de rastreamento:\n\n"
-            "_O mapa atualiza a cada 30 segundos automaticamente._",
+            "📋 *Gerenciamento de Rotas*\n\n"
+            "Status:\n"
+            "• ⚪ Pendente (sem motorista)\n"
+            "• 🔴 Em Rota (ativo)\n"
+            "• ✅ Concluída (100% entregue)\n\n"
+            "Clique em uma rota para ver detalhes e opções:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -1215,13 +1231,104 @@ async def cmd_rastrear(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-async def on_track_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Callback para abrir link de rastreamento"""
+async def on_view_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para visualizar detalhes de uma rota e opções"""
     query = update.callback_query
     await query.answer()
     
     data = query.data or ""
-    if not data.startswith("track_route:"):
+    if not data.startswith("view_route:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    context.user_data["view_route_id"] = route_id
+    
+    db = SessionLocal()
+    try:
+        route = db.get(Route, route_id)
+        if not route:
+            await query.answer("❌ Rota não encontrada!", show_alert=True)
+            return
+        
+        route_name = route.name or f"Rota {route.id}"
+        
+        # Calcula informações
+        total_packages = db.query(Package).filter(Package.route_id == route.id).count()
+        delivered_packages = db.query(Package).filter(
+            Package.route_id == route.id,
+            Package.status == "delivered"
+        ).count()
+        failed_packages = db.query(Package).filter(
+            Package.route_id == route.id,
+            Package.status == "failed"
+        ).count()
+        pending_packages = total_packages - delivered_packages - failed_packages
+        
+        # Determina status
+        if route.assigned_to_id:
+            if total_packages > 0 and delivered_packages == total_packages:
+                status = "✅ *CONCLUÍDA*"
+            else:
+                status = "🔴 *EM ROTA*"
+        else:
+            status = "⚪ *PENDENTE*"
+        
+        # Informações do motorista
+        driver_info = ""
+        if route.assigned_to:
+            driver = route.assigned_to
+            driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+            driver_info = f"\n👤 *Motorista:* {driver_name}"
+        
+        # Monta mensagem
+        info_text = (
+            f"📦 *{route_name}*\n\n"
+            f"Status: {status}\n"
+            f"{driver_info}\n\n"
+            f"📊 *Pacotes:*\n"
+            f"• Total: {total_packages}\n"
+            f"• Entregues: {delivered_packages}\n"
+            f"• Falhados: {failed_packages}\n"
+            f"• Pendentes: {pending_packages}\n\n"
+            f"📅 Criada em: {route.created_at.strftime('%d/%m/%Y %H:%M')}"
+        )
+        
+        # Cria keyboard com opções
+        keyboard = []
+        
+        # Opção de rastreamento (apenas se tem motorista e não está concluída)
+        if route.assigned_to_id and not (total_packages > 0 and delivered_packages == total_packages):
+            keyboard.append([
+                InlineKeyboardButton(text="🗺️ Rastrear", callback_data=f"track_view_route:{route.id}")
+            ])
+        
+        # Opção de deletar
+        keyboard.append([
+            InlineKeyboardButton(text="🗑️ Excluir Rota", callback_data=f"delete_view_route:{route.id}")
+        ])
+        
+        # Botão de voltar
+        keyboard.append([
+            InlineKeyboardButton(text="⬅️ Voltar", callback_data="back_to_routes")
+        ])
+        
+        await query.edit_message_text(
+            info_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
+async def on_track_view_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para rastrear uma rota ativa"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("track_view_route:"):
         return
     
     route_id = int(data.split(":", 1)[1])
@@ -1248,7 +1355,7 @@ async def on_track_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ).count()
         pending = total - delivered
         
-        await query.edit_message_text(
+        track_text = (
             f"🗺️ *Rastreamento em Tempo Real*\n\n"
             f"📦 *Rota:* {route_name}\n"
             f"👤 *Motorista:* {driver_name}\n\n"
@@ -1260,7 +1367,148 @@ async def on_track_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{map_link}\n\n"
             f"✅ Atualização automática a cada 30 segundos\n"
             f"📍 Ponto azul = localização do motorista\n\n"
-            f"_Clique no link acima para abrir o mapa!_",
+            f"_Clique no link acima para abrir o mapa!_"
+        )
+        
+        keyboard = [[InlineKeyboardButton(text="⬅️ Voltar", callback_data=f"view_route:{route.id}")]]
+        
+        await query.edit_message_text(
+            track_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
+async def on_delete_view_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para deletar uma rota"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("delete_view_route:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        route = db.get(Route, route_id)
+        if not route:
+            await query.answer("❌ Rota não encontrada!", show_alert=True)
+            return
+        
+        route_name = route.name or f"Rota {route.id}"
+        
+        # Conta pacotes
+        package_count = db.query(Package).filter(Package.route_id == route_id).count()
+        delivered_count = db.query(Package).filter(
+            Package.route_id == route_id,
+            Package.status == "delivered"
+        ).count()
+        
+        # Deleta comprovantes associados
+        db.query(DeliveryProof).filter(
+            DeliveryProof.package_id.in_(
+                db.query(Package.id).filter(Package.route_id == route_id)
+            )
+        ).delete(synchronize_session=False)
+        
+        # Deleta pacotes
+        db.query(Package).filter(Package.route_id == route_id).delete()
+        
+        # Deleta rota
+        db.delete(route)
+        db.commit()
+        
+        delete_text = (
+            f"✅ *Rota Excluída!*\n\n"
+            f"📦 {route_name}\n"
+            f"🗑️ Foram removidos:\n"
+            f"• {package_count} pacote(s)\n"
+            f"• {delivered_count} entregue(s)\n\n"
+            f"Use /rotas para voltar à lista de rotas."
+        )
+        
+        keyboard = [[InlineKeyboardButton(text="📋 Ver Todas as Rotas", callback_data="back_to_routes")]]
+        
+        await query.edit_message_text(
+            delete_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
+    finally:
+        db.close()
+
+
+async def on_back_to_routes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para voltar à lista de rotas"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Executa cmd_rotas diretamente passando a query
+    db = SessionLocal()
+    try:
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await query.answer("⛔ Acesso negado!", show_alert=True)
+            return
+        
+        routes = db.query(Route).order_by(Route.created_at.desc()).all()
+        
+        if not routes:
+            await query.edit_message_text(
+                "📭 *Nenhuma Rota Cadastrada*\n\n"
+                "Use /importar para criar uma nova rota!",
+                parse_mode='Markdown'
+            )
+            return
+        
+        keyboard = []
+        for route in routes[:30]:
+            route_name = route.name or f"Rota {route.id}"
+            
+            total_packages = db.query(Package).filter(Package.route_id == route.id).count()
+            delivered_packages = db.query(Package).filter(
+                Package.route_id == route.id,
+                Package.status == "delivered"
+            ).count()
+            
+            if route.assigned_to_id:
+                if total_packages > 0 and delivered_packages == total_packages:
+                    status_emoji = "✅"
+                    status_text = "Concluída"
+                else:
+                    status_emoji = "🔴"
+                    status_text = "Em Rota"
+            else:
+                status_emoji = "⚪"
+                status_text = "Pendente"
+            
+            driver_name = ""
+            if route.assigned_to:
+                driver_name = f" - {route.assigned_to.full_name or f'ID {route.assigned_to.telegram_user_id}'}"
+            
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{status_emoji} {route_name}{driver_name} ({delivered_packages}/{total_packages})",
+                    callback_data=f"view_route:{route.id}"
+                )
+            ])
+        
+        await query.edit_message_text(
+            "📋 *Gerenciamento de Rotas*\n\n"
+            "Status:\n"
+            "• ⚪ Pendente (sem motorista)\n"
+            "• 🔴 Em Rota (ativo)\n"
+            "• ✅ Concluída (100% entregue)\n\n"
+            "Clique em uma rota para ver detalhes e opções:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
         
@@ -1714,13 +1962,12 @@ async def cmd_enviarrota(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Criar keyboard com botões de info e deletar
+    # Criar keyboard com botões de seleção
     keyboard = []
     for r in routes[:25]:
         route_name = r.name or 'Rota'
         keyboard.append([
-            InlineKeyboardButton(text=f"📦 {route_name} (ID {r.id})", callback_data=f"sel_route:{r.id}"),
-            InlineKeyboardButton(text="🗑️", callback_data=f"delete_route:{r.id}")
+            InlineKeyboardButton(text=f"📦 {route_name} (ID {r.id})", callback_data=f"sel_route:{r.id}")
         ])
     
     await update.message.reply_text(
@@ -3296,6 +3543,11 @@ def setup_bot_handlers(app: Application):
     # Comandos básicos
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
+    app.add_handler(CommandHandler("rotas", cmd_rotas))
+    app.add_handler(CallbackQueryHandler(on_view_route, pattern=r"^view_route:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_track_view_route, pattern=r"^track_view_route:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_delete_view_route, pattern=r"^delete_view_route:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_back_to_routes, pattern=r"^back_to_routes$"))
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
@@ -3311,9 +3563,6 @@ def setup_bot_handlers(app: Application):
     )
     app.add_handler(import_conv)
 
-    app.add_handler(CommandHandler("rastrear", cmd_rastrear))
-    app.add_handler(CallbackQueryHandler(on_track_route, pattern=r"^track_route:\d+$"))
-    
     config_channel_conv = ConversationHandler(
         entry_points=[CommandHandler("configurarcanal", cmd_configurarcanal)],
         states={
