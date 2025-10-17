@@ -426,8 +426,22 @@
         throw new Error(`Erro ${res.status}: ${errorText}`);
       }
       
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch(jsonErr) {
+        const text = await res.text();
+        console.error('❌ Erro ao fazer parse JSON:', jsonErr);
+        console.error('📝 Response text:', text.substring(0, 500));
+        throw new Error(`JSON inválido: ${jsonErr.message}`);
+      }
+      
       console.log('✅ Dados recebidos:', data.length, 'pacotes', data);
+      
+      if (!Array.isArray(data)) {
+        console.error('❌ Dados não são um array:', typeof data);
+        throw new Error(`Tipo inesperado: esperado array, recebido ${typeof data}`);
+      }
 
       markersLayer.clearLayers();
       const list = document.getElementById('package-list');
