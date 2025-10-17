@@ -3751,6 +3751,313 @@ async def fin_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+# ==================== GERENCIAR REGISTROS FINANCEIROS ====================
+
+async def cmd_meus_registros(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lista todos os registros financeiros do manager com opções de editar/excluir"""
+    db = SessionLocal()
+    try:
+        user = get_user_by_tid(db, update.effective_user.id)
+        if not user or user.role != "manager":
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem gerenciar registros.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Busca todos os registros do mês (Mileage, Expense, Income)
+        now = datetime.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        mileage_records = db.query(Mileage).filter(
+            Mileage.date >= month_start.date(),
+            Mileage.created_by == user.id
+        ).order_by(Mileage.date.desc()).all()
+        
+        if not mileage_records:
+            await update.message.reply_text(
+                "📭 *Nenhum Registro Encontrado*\n\n"
+                "Você não tem registros financeiros neste mês.\n\n"
+                "Use /registrardia para criar o primeiro registro!",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Cria keyboard com datas dos registros
+        keyboard = []
+        for record in mileage_records[:30]:  # Limita a 30
+            date_str = record.date.strftime("%d/%m/%Y")
+            
+            # Busca dados associados a essa data
+            expenses_day = db.query(Expense).filter(
+                Expense.date == record.date,
+                Expense.created_by == user.id
+            ).all()
+            
+            income_day = db.query(Income).filter(
+                Income.date == record.date,
+                Income.created_by == user.id
+            ).all()
+            
+            total_income = sum(inc.amount for inc in income_day)
+            total_expenses = sum(exp.amount for exp in expenses_day)
+            balance = total_income - total_expenses
+            
+            # Determina emoji baseado no balance
+            emoji = "💚" if balance >= 0 else "❌"
+            
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{emoji} {date_str} - R$ {balance:,.2f}",
+                    callback_data=f"view_fin_record:{record.id}"
+                )
+            ])
+        
+        await update.message.reply_text(
+            "📋 *Meus Registros Financeiros*\n\n"
+            "Selecione um dia para visualizar, editar ou excluir:\n\n"
+            "💚 = Lucro | ❌ = Prejuízo",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
+async def on_view_fin_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Visualiza detalhes de um registro financeiro com opções"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("view_fin_record:"):
+        return
+    
+    mileage_id = int(data.split(":", 1)[1])
+    context.user_data['view_fin_record_id'] = mileage_id
+    
+    db = SessionLocal()
+    try:
+        mileage = db.get(Mileage, mileage_id)
+        if not mileage:
+            await query.answer("❌ Registro não encontrado!", show_alert=True)
+            return
+        
+        user_id = mileage.created_by
+        record_date = mileage.date
+        
+        # Busca dados do dia
+        expenses_day = db.query(Expense).filter(
+            Expense.date == record_date,
+            Expense.created_by == user_id
+        ).all()
+        
+        income_day = db.query(Income).filter(
+            Income.date == record_date,
+            Income.created_by == user_id
+        ).all()
+        
+        total_income = sum(inc.amount for inc in income_day)
+        total_expenses = sum(exp.amount for exp in expenses_day)
+        balance = total_income - total_expenses
+        
+        # Monta detalhes
+        details = f"📊 *Registro - {record_date.strftime('%d/%m/%Y')}*\n\n"
+        details += f"🚗 *KM Rodados:* {mileage.km_total} km\n\n"
+        
+        # Combustível
+        fuel_expenses = [e for e in expenses_day if e.type == 'combustivel']
+        if fuel_expenses:
+            details += f"⛽ *Combustível:*\n"
+            for exp in fuel_expenses:
+                details += f"  • {exp.description}: R$ {exp.amount:.2f}\n"
+            details += "\n"
+        
+        # Renda
+        if income_day:
+            details += f"💰 *Ganhos:*\n"
+            for inc in income_day:
+                details += f"  • {inc.description}: R$ {inc.amount:.2f}\n"
+            details += f"  *Subtotal:* R$ {total_income:.2f}\n\n"
+        else:
+            details += f"💰 *Ganhos:* R$ 0.00\n\n"
+        
+        # Salários
+        salary_expenses = [e for e in expenses_day if e.type == 'salario']
+        if salary_expenses:
+            details += f"👤 *Salários:*\n"
+            for exp in salary_expenses:
+                details += f"  • {exp.employee_name}: R$ {exp.amount:.2f}\n"
+        
+        # Outras despesas
+        other_expenses = [e for e in expenses_day if e.type not in ['combustivel', 'salario']]
+        if other_expenses:
+            details += f"🛠️ *Outras Despesas:*\n"
+            for exp in other_expenses:
+                details += f"  • {exp.description}: R$ {exp.amount:.2f}\n"
+        
+        details += f"\n💸 *Total Despesas:* R$ {total_expenses:.2f}\n"
+        details += f"📈 *Saldo:* R$ {balance:.2f}"
+        if balance < 0:
+            details += " ⚠️"
+        
+        if mileage.notes:
+            details += f"\n\n📝 *Observações:* {mileage.notes}"
+        
+        # Keyboard com opções
+        keyboard = [
+            [InlineKeyboardButton(text="✏️ Editar", callback_data=f"edit_fin_record:{mileage_id}")],
+            [InlineKeyboardButton(text="🗑️ Excluir", callback_data=f"delete_fin_record:{mileage_id}")],
+            [InlineKeyboardButton(text="⬅️ Voltar", callback_data="back_to_fin_records")]
+        ]
+        
+        await query.edit_message_text(
+            details,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
+async def on_edit_fin_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia edição de um registro - mostra opções do que editar"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("edit_fin_record:"):
+        return
+    
+    mileage_id = int(data.split(":", 1)[1])
+    context.user_data['edit_fin_record_id'] = mileage_id
+    
+    keyboard = [
+        [InlineKeyboardButton(text="🚗 KM Rodados", callback_data=f"edit_fin_km:{mileage_id}")],
+        [InlineKeyboardButton(text="⛽ Combustível", callback_data=f"edit_fin_fuel:{mileage_id}")],
+        [InlineKeyboardButton(text="💰 Ganhos", callback_data=f"edit_fin_income:{mileage_id}")],
+        [InlineKeyboardButton(text="👤 Salários", callback_data=f"edit_fin_salary:{mileage_id}")],
+        [InlineKeyboardButton(text="🛠️ Despesas", callback_data=f"edit_fin_expenses:{mileage_id}")],
+        [InlineKeyboardButton(text="📝 Observações", callback_data=f"edit_fin_notes:{mileage_id}")],
+        [InlineKeyboardButton(text="⬅️ Voltar", callback_data=f"view_fin_record:{mileage_id}")]
+    ]
+    
+    await query.edit_message_text(
+        "✏️ *Editar Registro*\n\n"
+        "O que você deseja alterar?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+
+async def on_delete_fin_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Deleta um registro financeiro com confirmação"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("delete_fin_record:"):
+        return
+    
+    mileage_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        mileage = db.get(Mileage, mileage_id)
+        if not mileage:
+            await query.answer("❌ Registro não encontrado!", show_alert=True)
+            return
+        
+        record_date = mileage.date
+        user_id = mileage.created_by
+        
+        # Confirma exclusão
+        keyboard = [
+            [
+                InlineKeyboardButton(text="⚠️ SIM, Excluir", callback_data=f"confirm_delete_fin:{mileage_id}"),
+                InlineKeyboardButton(text="❌ Cancelar", callback_data=f"view_fin_record:{mileage_id}")
+            ]
+        ]
+        
+        await query.edit_message_text(
+            f"🗑️ *EXCLUIR REGISTRO*\n\n"
+            f"Data: {record_date.strftime('%d/%m/%Y')}\n\n"
+            f"⚠️ *Isso vai apagar:*\n"
+            f"  • Quilometragem registrada\n"
+            f"  • Todos os ganhos do dia\n"
+            f"  • Todos os salários pagos\n"
+            f"  • Todas as despesas\n"
+            f"  • Observações\n\n"
+            f"*Esta ação NÃO pode ser desfeita!*\n\n"
+            f"Tem certeza?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
+async def on_confirm_delete_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirma e executa a exclusão do registro"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("confirm_delete_fin:"):
+        return
+    
+    mileage_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        mileage = db.get(Mileage, mileage_id)
+        if not mileage:
+            await query.answer("❌ Registro não encontrado!", show_alert=True)
+            return
+        
+        record_date = mileage.date
+        user_id = mileage.created_by
+        
+        # Deleta todos os dados do dia
+        db.query(Expense).filter(
+            Expense.date == record_date,
+            Expense.created_by == user_id
+        ).delete()
+        
+        db.query(Income).filter(
+            Income.date == record_date,
+            Income.created_by == user_id
+        ).delete()
+        
+        db.delete(mileage)
+        db.commit()
+        
+        await query.edit_message_text(
+            f"✅ *Registro Excluído!*\n\n"
+            f"O registro de {record_date.strftime('%d/%m/%Y')} foi removido do sistema.\n\n"
+            f"Use /meus_registros para voltar à lista.",
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
+    finally:
+        db.close()
+
+
+async def on_back_to_fin_records(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Volta à lista de registros"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Executa cmd_meus_registros
+    await cmd_meus_registros(update, context)
+
+
 async def _post_init(application):
     """Executa após inicialização da Application: garante que webhook esteja desabilitado."""
     try:
@@ -3786,6 +4093,12 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(on_delete_view_route, pattern=r"^delete_view_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_back_to_routes, pattern=r"^back_to_routes$"))
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
+    app.add_handler(CommandHandler("meus_registros", cmd_meus_registros))
+    app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_edit_fin_record, pattern=r"^edit_fin_record:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_delete_fin_record, pattern=r"^delete_fin_record:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_confirm_delete_fin, pattern=r"^confirm_delete_fin:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_back_to_fin_records, pattern=r"^back_to_fin_records$"))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
     import_conv = ConversationHandler(
