@@ -54,39 +54,55 @@ def create_app() -> FastAPI:
     def get_route_packages(route_id: int, db=Depends(get_db_session)):
         print(f"🔍 GET /route/{route_id}/packages - Buscando pacotes...")
         
-        route = db.query(Route).filter(Route.id == route_id).first()
-        if not route:
-            print(f"❌ Rota {route_id} não encontrada!")
-            raise HTTPException(status_code=404, detail="Route not found")
-        
-        print(f"✅ Rota encontrada: {route.name}")
-        
-        # Tenta ordenar por order_in_route, mas fallback para id se coluna não existir
         try:
-            packages = (
-                db.query(Package)
-                .filter(Package.route_id == route_id)
-                .order_by(Package.order_in_route.asc(), Package.id.asc())
-                .all()
-            )
-            print(f"✅ Usando ordenação por order_in_route")
+            route = db.query(Route).filter(Route.id == route_id).first()
+            if not route:
+                print(f"❌ Rota {route_id} não encontrada!")
+                raise HTTPException(status_code=404, detail="Route not found")
+            
+            print(f"✅ Rota encontrada: {route.name}")
+            
+            # Tenta ordenar por order_in_route, mas fallback para id se coluna não existir
+            try:
+                packages = (
+                    db.query(Package)
+                    .filter(Package.route_id == route_id)
+                    .order_by(Package.order_in_route.asc(), Package.id.asc())
+                    .all()
+                )
+                print(f"✅ Usando ordenação por order_in_route")
+            except Exception as e:
+                print(f"⚠️ order_in_route não existe, usando fallback: {e}")
+                # Fallback se order_in_route não existir no banco
+                packages = (
+                    db.query(Package)
+                    .filter(Package.route_id == route_id)
+                    .order_by(Package.id.asc())
+                    .all()
+                )
+            
+            print(f"📦 {len(packages)} pacotes encontrados")
+            for p in packages[:3]:  # Mostra os 3 primeiros
+                print(f"  - {p.tracking_code}: lat={p.latitude}, lng={p.longitude}, status={p.status}")
+            
+            result = []
+            for p in packages:
+                try:
+                    item = PackageOut.model_validate(p)
+                    result.append(item)
+                except Exception as e:
+                    print(f"❌ Erro ao serializar pacote {p.id}: {e}")
+                    raise HTTPException(status_code=500, detail=f"Serialization error for package {p.id}: {str(e)}")
+            
+            print(f"✅ Retornando {len(result)} pacotes serializados")
+            return result
+        except HTTPException:
+            raise
         except Exception as e:
-            print(f"⚠️ order_in_route não existe, usando fallback: {e}")
-            # Fallback se order_in_route não existir no banco
-            packages = (
-                db.query(Package)
-                .filter(Package.route_id == route_id)
-                .order_by(Package.id.asc())
-                .all()
-            )
-        
-        print(f"📦 {len(packages)} pacotes encontrados")
-        for p in packages[:3]:  # Mostra os 3 primeiros
-            print(f"  - {p.tracking_code}: lat={p.latitude}, lng={p.longitude}, status={p.status}")
-        
-        result = [PackageOut.model_validate(p) for p in packages]
-        print(f"✅ Retornando {len(result)} pacotes serializados")
-        return result
+            print(f"❌ Erro geral em get_route_packages: {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Erro ao carregar pacotes: {str(e)}")
 
     @app.get("/map/{route_id}/{driver_id}", response_class=HTMLResponse)
     def map_page(route_id: int, driver_id: int, request: Request):
@@ -94,6 +110,8 @@ def create_app() -> FastAPI:
         base_url = str(request.base_url).rstrip("/")
         if base_url.startswith("http://") and "render.com" in base_url:
             base_url = base_url.replace("http://", "https://")
+        
+        print(f"📱 Map page carregado: route_id={route_id}, driver_id={driver_id}, base_url={base_url}")
         
         return templates.TemplateResponse(
             "map.html",
