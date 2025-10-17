@@ -2146,66 +2146,6 @@ async def on_delete_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
-async def on_delete_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Callback para excluir rota"""
-    query = update.callback_query
-    await query.answer()
-    
-    data = query.data or ""
-    if not data.startswith("delete_route:"):
-        return
-    
-    route_id = int(data.split(":", 1)[1])
-    
-    db = SessionLocal()
-    try:
-        # Verifica permissão
-        me = get_user_by_tid(db, update.effective_user.id)
-        if not me or me.role != "manager":
-            await query.answer("⛔ Apenas gerentes podem excluir rotas!", show_alert=True)
-            return
-        
-        # Busca rota
-        route = db.get(Route, route_id)
-        if not route:
-            await query.answer("❌ Rota não encontrada!", show_alert=True)
-            return
-        
-        route_name = route.name or f"Rota {route.id}"
-        
-        # Conta pacotes e entregas
-        package_count = db.query(Package).filter(Package.route_id == route_id).count()
-        delivered_count = db.query(Package).filter(
-            Package.route_id == route_id,
-            Package.status == "delivered"
-        ).count()
-        
-        if package_count > 0:
-            await query.answer(
-                f"⚠️ Esta rota tem {package_count} pacote(s)!\n"
-                f"({delivered_count} entregue(s))\n"
-                f"Todos serão deletados.",
-                show_alert=True
-            )
-        
-        # Deleta rota (cascade deleta pacotes e provas)
-        db.delete(route)
-        db.commit()
-        
-        await query.edit_message_text(
-            f"✅ *Rota Excluída!*\n\n"
-            f"📦 {route_name}\n"
-            f"🗑️ {package_count} pacote(s) removido(s)\n\n"
-            f"Use /enviarrota para ver a lista atualizada.",
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
-    finally:
-        db.close()
-
-
 # Cadastro/listagem de entregadores
 async def add_driver_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
