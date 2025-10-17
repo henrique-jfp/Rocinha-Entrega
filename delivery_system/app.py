@@ -34,6 +34,16 @@ def create_app() -> FastAPI:
     init_db()
 
     app = FastAPI(title="Delivery System API")
+    
+    # Adicionar CORS para permitir requisições do mapa
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Em produção, pode restringir a domínios específicos
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # Static and templates
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -108,10 +118,33 @@ def create_app() -> FastAPI:
     def map_page(route_id: int, driver_id: int, request: Request):
         # Force HTTPS for base_url to avoid mixed content errors
         base_url = str(request.base_url).rstrip("/")
-        if base_url.startswith("http://") and "render.com" in base_url:
-            base_url = base_url.replace("http://", "https://")
+        original_url = base_url
         
-        print(f"📱 Map page carregado: route_id={route_id}, driver_id={driver_id}, base_url={base_url}")
+        # Headers úteis para debug
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "").lower()
+        forwarded_host = request.headers.get("X-Forwarded-Host", "")
+        host_header = request.headers.get("Host", "")
+        
+        # Se está rodando em produção, sempre force HTTPS
+        # Critérios: header X-Forwarded-Proto=https OU URL em produção (railway/render)
+        is_production = (
+            forwarded_proto == "https" or
+            "railway.app" in base_url or
+            "render.com" in base_url or
+            "rocinha-entrega" in base_url
+        )
+        
+        if is_production and base_url.startswith("http://"):
+            base_url = base_url.replace("http://", "https://", 1)
+        
+        print(f"📱 Map page carregado:")
+        print(f"   route_id={route_id}, driver_id={driver_id}")
+        print(f"   URL original: {original_url}")
+        print(f"   X-Forwarded-Proto: {forwarded_proto}")
+        print(f"   X-Forwarded-Host: {forwarded_host}")
+        print(f"   Host header: {host_header}")
+        print(f"   É produção: {is_production}")
+        print(f"   ✅ base_url final: {base_url}")
         
         return templates.TemplateResponse(
             "map.html",
