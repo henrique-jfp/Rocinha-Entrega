@@ -891,37 +891,99 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_expenses = db.query(Expense).filter(Expense.date >= month_start.date()).count()
         total_mileage = db.query(Mileage).filter(Mileage.date >= month_start.date()).count()
         
-        # Monta prompt para a IA
-        prompt = f"""Você é um analista financeiro especializado em logística e entregas. 
-Analise os dados abaixo e forneça um relatório completo e profissional em português do Brasil.
+        # Coleta dados financeiros detalhados
+        from sqlalchemy import func
+        
+        total_revenue = db.query(func.sum(Income.amount)).filter(Income.date >= month_start.date()).scalar() or 0
+        total_spent = db.query(func.sum(Expense.amount)).filter(Expense.date >= month_start.date()).scalar() or 0
+        total_km = db.query(func.sum(Mileage.km_total)).filter(Mileage.date >= month_start.date()).scalar() or 0
+        
+        net_profit = total_revenue - total_spent
+        profit_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else 0
+        
+        # Calcula dados por motorista
+        drivers = db.query(User).filter(User.role == "driver").all()
+        drivers_data = []
+        for driver in drivers:
+            driver_routes = db.query(Route).filter(Route.assigned_to_id == driver.id, Route.created_at >= month_start).count()
+            driver_packages = db.query(Package).join(Route).filter(
+                Route.assigned_to_id == driver.id,
+                Route.created_at >= month_start
+            ).count()
+            driver_delivered = db.query(Package).join(Route).filter(
+                Route.assigned_to_id == driver.id,
+                Route.created_at >= month_start,
+                Package.status == "delivered"
+            ).count()
+            
+            drivers_data.append({
+                'name': driver.full_name or f"Motorista {driver.id}",
+                'routes': driver_routes,
+                'packages': driver_packages,
+                'delivered': driver_delivered,
+                'success_rate': (driver_delivered / driver_packages * 100) if driver_packages > 0 else 0
+            })
+        
+        # Monta prompt profissional para a IA
+        prompt = f"""Você é um analista financeiro senior especializado em logística e entregas. 
+GERE UM RELATÓRIO EXECUTIVO PROFISSIONAL E BEM ESTRUTURADO.
 
-**DADOS DO MÊS ATUAL ({now.strftime('%B/%Y')})**
+═══════════════════════════════════════════════════════════════
+DADOS OPERACIONAIS - {now.strftime('%B de %Y')}
+═══════════════════════════════════════════════════════════════
 
-📦 ENTREGAS:
-- Total de pacotes: {total_packages}
-- Entregues: {delivered_packages}
-- Falhas: {failed_packages}
-- Taxa de sucesso: {(delivered_packages/total_packages*100 if total_packages > 0 else 0):.1f}%
+📦 PERFORMANCE DE ENTREGAS:
+• Total de pacotes processados: {total_packages}
+• Pacotes entregues com sucesso: {delivered_packages}
+• Falhas na entrega: {failed_packages}
+• Taxa de sucesso: {(delivered_packages/total_packages*100 if total_packages > 0 else 0):.1f}%
 
-🚚 OPERAÇÕES:
-- Rotas criadas: {total_routes}
-- Motoristas ativos: {active_drivers}
-- Média pacotes/rota: {(total_packages/total_routes if total_routes > 0 else 0):.1f}
+🚚 OPERAÇÕES LOGÍSTICAS:
+• Rotas criadas no período: {total_routes}
+• Motoristas ativos: {active_drivers}
+• Média de pacotes por rota: {(total_packages/total_routes if total_routes > 0 else 0):.1f}
+• Quilometragem registrada: {total_km:.1f} km
 
-💰 REGISTROS FINANCEIROS:
-- Receitas registradas: {total_income}
-- Despesas registradas: {total_expenses}
-- Registros de KM: {total_mileage}
+💰 ANÁLISE FINANCEIRA:
+• RECEITA TOTAL: R$ {total_revenue:,.2f}
+• DESPESAS TOTAIS: R$ {total_spent:,.2f}
+• LUCRO LÍQUIDO: R$ {net_profit:,.2f}
+• MARGEM DE LUCRO: {profit_margin:.1f}%
 
-**IMPORTANTE:**
-- Forneça uma análise detalhada com insights acionáveis
-- Identifique pontos fortes e áreas de melhoria
-- Sugira ações concretas para otimização
-- Use emojis para tornar o relatório mais visual
-- Seja objetivo mas completo (máximo 800 palavras)
-- Estruture com seções: Resumo Executivo, Desempenho Operacional, Análise Financeira, Recomendações
+📊 DETALHAMENTO POR MOTORISTA:
+{chr(10).join([f"  {d['name']}: {d['routes']} rota(s), {d['delivered']}/{d['packages']} entregas ({d['success_rate']:.1f}% sucesso)" for d in drivers_data])}
 
-Gere o relatório agora:"""
+═══════════════════════════════════════════════════════════════
+INSTRUÇÕES CRÍTICAS PARA O RELATÓRIO:
+═══════════════════════════════════════════════════════════════
+
+✅ OBRIGATORIAMENTE incluir:
+1. SUMÁRIO EXECUTIVO: 1-2 parágrafos, linguagem clara, sem jargão
+2. ANÁLISE FINANCEIRA COM NÚMEROS: Quanto faturou? Quanto gastou? Lucro real?
+3. ANÁLISE POR MOTORISTA: Performance, eficiência, ROI (retorno do investimento)
+4. VIABILIDADE ECONÔMICA: Vale expandir? Contratar mais motoristas? Com base em números reais
+5. COMBUSTÍVEL & CUSTOS OPERACIONAIS: Consumo, projeção, economy per delivery
+6. RECOMENDAÇÕES CONCRETAS: 3-5 ações específicas com números
+
+✅ FORMATAÇÃO:
+• Use títulos com emojis mas SEM exagero
+• Parágrafos curtos e diretos (máximo 2-3 linhas)
+• Dados sempre em negrito quando monetários
+• Estrutura visual com separadores (───)
+• Conclusão clara e executiva
+
+✅ LINGUAGEM:
+• Profissional mas acessível
+• Evite: "pode ser considerado", "sugerindo que", "indica uma"
+• Use: números concretos, afirmações diretas, análise crítica
+• Foco em RESULTADOS e DECISÕES
+
+✅ ANÁLISE DE VIABILIDADE:
+• Se lucro/receita < 30%: "Margem apertada, necessário revisar custos"
+• Se múltiplos motoristas: "Comparar performance, avaliar realocação"
+• Projetar: "Se expandir para X motoristas, lucro seria..."
+
+Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
 
         # Atualiza mensagem
         await processing_msg.edit_text(
