@@ -187,24 +187,6 @@
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';
     
-    // Botão de marcar entregue (apenas se pendente)
-    const markDeliveredBtn = pkg.status === 'pending' ? `
-      <button onclick="markPackageDelivered(${pkg.id})" style="
-        padding: 8px 12px;
-        background: #10b981;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        font-weight: 600;
-        font-size: 12px;
-        cursor: pointer;
-        transition: all 0.2s;
-        flex: 1;
-      " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
-        ✅ Marcar Entregue
-      </button>
-    ` : '';
-    
     return `
       <div>
         <div class="popup-code">${track}</div>
@@ -215,10 +197,28 @@
           border-top: 1px solid #e5e7eb;
           display: flex;
           gap: 6px;
-          align-items: stretch;
+          flex-direction: column;
         ">
-          <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">🧭 Navegar</a>
-          ${markDeliveredBtn || `<a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">✓ Entregar</a>`}
+          <div style="display: flex; gap: 6px;">
+            <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">🧭 Navegar</a>
+            <a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">✓ Entregar</a>
+          </div>
+          ${pkg.status === 'pending' ? `
+            <button onclick="markPackageDelivered(${pkg.id})" style="
+              padding: 8px 12px;
+              background: #10b981;
+              color: white;
+              border: none;
+              border-radius: 6px;
+              font-weight: 600;
+              font-size: 13px;
+              cursor: pointer;
+              transition: all 0.2s;
+              width: 100%;
+            " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+              ✅ Marcar Entregue (Rápido)
+            </button>
+          ` : ''}
         </div>
       </div>`;
   }
@@ -438,11 +438,35 @@
       display: inline-block;
     `;
 
+    // Botão de Entregar via Telegram (fluxo completo com fotos)
+    let deliverBtn = null;
+    if (pkg.status === 'pending') {
+      deliverBtn = document.createElement('a');
+      deliverBtn.className = 'deliver-btn';
+      deliverBtn.textContent = '📋 Entregar';
+      deliverBtn.title = 'Abrir Telegram para registro completo com fotos';
+      deliverBtn.href = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
+      deliverBtn.target = '_blank';
+      deliverBtn.rel = 'noopener';
+      deliverBtn.style.cssText = `
+        padding: 6px 10px;
+        margin-left: 4px;
+        text-decoration: none;
+        display: inline-block;
+        background: #3b82f6;
+        color: white;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+      `;
+    }
+
     li.appendChild(pinNum);
     li.appendChild(info);
     li.appendChild(badge);
     li.appendChild(actionBtn);
     li.appendChild(navBtn);
+    if (deliverBtn) li.appendChild(deliverBtn);
 
     li.addEventListener('click', (e)=>{
       if(e.target.tagName.toLowerCase() === 'a' || e.target.tagName.toLowerCase() === 'button') return;
