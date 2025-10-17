@@ -59,7 +59,8 @@ ai_model_name = None
 if GROQ_API_KEY:
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
-        ai_model_name = "llama-3.1-70b-versatile"  # Modelo rápido e inteligente
+        # Modelos disponíveis (nov 2024): llama-3.3-70b-versatile, llama-3.1-8b-instant, gemma2-9b-it
+        ai_model_name = "llama-3.3-70b-versatile"  # Modelo mais recente e poderoso
         print("✅ Groq API inicializada com sucesso")
     except Exception as e:
         print(f"⚠️ Erro ao inicializar Groq API: {e}")
