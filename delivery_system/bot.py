@@ -1015,22 +1015,37 @@ Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
                 
                 ai_analysis = response.choices[0].message.content
                 
-                # Salva no banco (AIReport usa month/year, não user_id)
+                # Salva no banco (AIReport usa month/year como chave única)
                 try:
-                    # Tenta salvar - se já existir relatório do mês, ignora erro de constraint
-                    report = AIReport(
-                        month=now.month,
-                        year=now.year,
-                        report_text=ai_analysis,
-                        total_income=total_income,
-                        total_expenses=total_expenses,
-                        total_km=total_mileage,
-                        created_by=me.telegram_user_id
-                    )
-                    db.add(report)
+                    # Tenta encontrar relatório existente do mês
+                    existing_report = db.query(AIReport).filter(
+                        AIReport.month == now.month,
+                        AIReport.year == now.year
+                    ).first()
+                    
+                    if existing_report:
+                        # UPDATE: atualiza relatório existente
+                        existing_report.report_text = ai_analysis
+                        existing_report.total_income = total_income
+                        existing_report.total_expenses = total_expenses
+                        existing_report.total_km = total_mileage
+                        existing_report.created_by = me.telegram_user_id
+                    else:
+                        # INSERT: cria novo relatório
+                        report = AIReport(
+                            month=now.month,
+                            year=now.year,
+                            report_text=ai_analysis,
+                            total_income=total_income,
+                            total_expenses=total_expenses,
+                            total_km=total_mileage,
+                            created_by=me.telegram_user_id
+                        )
+                        db.add(report)
+                    
                     db.commit()
                 except Exception as save_err:
-                    # Se falhar ao salvar (ex: constraint), apenas mostra o relatório
+                    # Se falhar ao salvar, apenas mostra o relatório
                     print(f"Aviso ao salvar relatório: {save_err}")
                     db.rollback()
                 
@@ -2053,25 +2068,13 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         db.commit()
         
-        # Salva route_id e tracking_codes no context para usar no scraping
-        context.user_data['import_route_id'] = route.id
-        context.user_data['import_tracking_codes'] = [it["tracking_code"] for it in items]
-        context.user_data['import_package_count'] = len(items)
-        
         # NOTA: A otimização agora é feita no /enviarrota, após selecionar o motorista
-        
-        # Pergunta se quer fazer scraping
-        
-        
-        # Pergunta se quer fazer scraping
-        keyboard = [['Sim', 'Não']]
         await update.message.reply_text(
             f"✅ *Pacotes Importados!*\n\n"
             f"🆔 ID da Rota: `{route.id}`\n"
-            f"📦 Total de Pacotes: *{len(items)}*\n\n" + f"💡 *A rota será otimizada quando você atribuir a um motorista*\n" + f"_(Use /enviarrota)_\n\n"
-            f"� *Deseja extrair telefones do app SPX?*\n\n"
-            f"⚠️ _Você precisará ter o celular conectado via USB com o app SPX aberto._",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
+            f"📦 Total de Pacotes: *{len(items)}*\n\n"
+            f"💡 *A rota será otimizada quando você atribuir a um motorista*\n"
+            f"_(Use /enviarrota)_",
             parse_mode='Markdown'
         )
         return ConversationHandler.END
@@ -2084,269 +2087,6 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         db.close()
 
 
-    db = SessionLocal()
-    try:
-        me = get_user_by_tid(db, update.effective_user.id)
-        if not me or me.role != "manager":
-            await update.message.reply_text(
-                "⛔ *Acesso Negado*\n\n"
-                "Apenas gerentes podem enviar rotas para motoristas.",
-                parse_mode='Markdown'
-            )
-            return
-        args = context.args or []
-        if len(args) == 2:
-            try:
-                route_id = int(args[0])
-                driver_tid = int(args[1])
-            except ValueError:
-                await update.message.reply_text(
-                    "❌ *IDs Inválidos*\n\n"
-                    "Use: `/enviarrota <id_rota> <id_motorista>`",
-                    parse_mode='Markdown'
-                )
-                return
-            route = db.get(Route, route_id)
-            if not route:
-                await update.message.reply_text(
-                    "❌ *Rota Não Encontrada*\n\n"
-                    f"Não existe rota com ID `{route_id}`.",
-                    parse_mode='Markdown'
-                )
-                return
-            driver = get_user_by_tid(db, driver_tid)
-            if not driver:
-                driver = User(telegram_user_id=driver_tid, full_name=None, role="driver")
-                db.add(driver)
-                db.flush()
-            route.assigned_to_id = driver.id
-            db.commit()
-            count = db.query(Package).filter(Package.route_id == route.id).count()
-            link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
-            route_name = route.name or f"Rota {route.id}"
-            driver_name = driver.full_name or f"ID {driver_tid}"
-            
-            try:
-                # Envia para o motorista
-                await context.bot.send_message(
-                    chat_id=driver_tid,
-                    text=(
-                        f"🎯 *Nova Rota Atribuída!*\n\n"
-                        f"📦 Rota: *{route_name}*\n"
-                        f"📊 Total de Pacotes: *{count}*\n"
-                        f"🗺️ Mapa Interativo: [Clique Aqui]({link})\n\n"
-                        f"💡 _Abra o mapa para ver todas as entregas e começar!_"
-                    ),
-                    parse_mode='Markdown'
-                )
-                
-                # Envia também para o gerente (para rastreamento)
-                await update.message.reply_text(
-                    f"✅ *Rota Enviada com Sucesso!*\n\n"
-                    f"📦 *Rota:* {route_name}\n"
-                    f"👤 *Motorista:* {driver_name}\n"
-                    f"📊 *Pacotes:* {count}\n\n"
-                    f"🗺️ *Link de Rastreamento:*\n"
-                    f"{link}\n\n"
-                    f"💡 _Use este link para acompanhar em tempo real!_\n"
-                    f"_Atualização automática a cada 30 segundos._",
-                    parse_mode='Markdown'
-                )
-            except Exception:
-                await update.message.reply_text(
-                    "⚠️ *Erro ao Enviar*\n\n"
-                    "Não consegui enviar a mensagem ao motorista.\n\n"
-                    "Possíveis causas:\n"
-                    "• O motorista ainda não iniciou conversa com o bot\n"
-                    "• O ID do motorista está incorreto\n\n"
-                    "💡 Peça ao motorista para enviar /start no bot.",
-                    parse_mode='Markdown'
-                )
-            return
-    finally:
-        db.close()
-
-    # Interativo: listar rotas
-    db = SessionLocal()
-    try:
-        routes = db.query(Route).order_by(Route.created_at.desc()).all()
-    finally:
-        db.close()
-    if not routes:
-        await update.message.reply_text(
-            "📭 *Nenhuma Rota Disponível*\n\n"
-            "Use /importar para criar uma nova rota primeiro!",
-            parse_mode='Markdown'
-        )
-        return
-    
-    # Criar keyboard com botões de info e deletar
-    keyboard = []
-    for r in routes[:25]:
-        route_name = r.name or 'Rota'
-        keyboard.append([
-            InlineKeyboardButton(text=f"📦 {route_name} (ID {r.id})", callback_data=f"sel_route:{r.id}"),
-            InlineKeyboardButton(text="🗑️", callback_data=f"delete_route:{r.id}")
-        ])
-    
-    await update.message.reply_text(
-        "🚚 *Enviar Rota para Motorista*\n\n"
-        "Selecione a rota que deseja atribuir:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
-    return SEND_SELECT_ROUTE
-
-
-async def on_select_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data or ""
-    if not data.startswith("sel_route:"):
-        return
-    route_id = int(data.split(":", 1)[1])
-    context.user_data["send_route_id"] = route_id
-
-    db = SessionLocal()
-    try:
-        drivers = db.query(User).filter(User.role == "driver").order_by(User.id.desc()).all()
-    finally:
-        db.close()
-    if not drivers:
-        await query.edit_message_text(
-            "👥 *Nenhum Motorista Cadastrado*\n\n"
-            "Use /cadastrardriver para adicionar motoristas primeiro!",
-            parse_mode='Markdown'
-        )
-        return ConversationHandler.END
-
-    keyboard = [[InlineKeyboardButton(text=f"👤 {(d.full_name or 'Sem nome')} (ID {d.telegram_user_id})",
-                                       callback_data=f"sel_driver:{d.telegram_user_id}")]
-                for d in drivers[:25]]
-    await query.edit_message_text(
-        f"🚚 *Rota Selecionada: ID {route_id}*\n\n"
-        f"Agora escolha o motorista que receberá esta rota:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
-    return SEND_SELECT_DRIVER
-
-
-async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data or ""
-    if not data.startswith("sel_driver:"):
-        await query.answer()
-        return
-    
-    driver_tid = int(data.split(":", 1)[1])
-    route_id = context.user_data.get("send_route_id")
-    
-    # Responde IMEDIATAMENTE ao callback para evitar timeout
-    await query.answer("Processando rota...")
-    
-    if not route_id:
-        await query.edit_message_text(
-            "❌ *Erro Interno*\n\n"
-            "Rota não selecionada. Tente novamente com /enviarrota.",
-            parse_mode='Markdown'
-        )
-        return ConversationHandler.END
-
-    db = SessionLocal()
-    try:
-        route = db.get(Route, int(route_id))
-        if not route:
-            await query.edit_message_text(
-                "❌ *Rota Não Encontrada*\n\n"
-                f"A rota ID `{route_id}` não existe mais.",
-                parse_mode='Markdown'
-            )
-            return ConversationHandler.END
-        
-        driver = get_user_by_tid(db, driver_tid)
-        if not driver:
-            driver = User(telegram_user_id=driver_tid, full_name=None, role="driver")
-            db.add(driver)
-            db.flush()
-        
-        route.assigned_to_id = driver.id
-        db.commit()
-        
-        # Informações básicas
-        count = db.query(Package).filter(Package.route_id == route.id).count()
-        route_name = route.name or f"Rota {route.id}"
-        driver_name = driver.full_name or f"ID {driver_tid}"
-        
-        # Edita mensagem para mostrar progresso
-        await query.edit_message_text(
-            f"⏳ *Processando Rota...*\n\n"
-            f"📦 *Rota:* {route_name}\n"
-            f"👤 *Motorista:* {driver_name}\n"
-            f"📊 *Pacotes:* {count}\n\n"
-            f"🔄 _Otimizando sequência de entregas..._",
-            parse_mode='Markdown'
-        )
-        
-        # ==================== OTIMIZAÇÃO DE ROTA POR MOTORISTA ====================
-        # Busca todos os pacotes da rota
-        all_packages = db.query(Package).filter(Package.route_id == route.id).all()
-        
-        # Usa o endereço de casa do motorista (se configurado) ou coordenadas padrão
-        start_lat = driver.home_latitude or DEPOT_LAT
-        start_lon = driver.home_longitude or DEPOT_LON
-        
-        # Otimiza a ordem usando TSP com o ponto de partida do motorista
-        optimized_count = optimize_route_packages(db, all_packages, start_lat, start_lon)
-        
-        # Mensagem sobre otimização
-        if driver.home_latitude and driver.home_longitude:
-            opt_msg = f"\n🎯 *Rota otimizada* a partir da casa do motorista!"
-        else:
-            opt_msg = f"\n⚠️ _Motorista sem endereço cadastrado. Use /configurarcasa._"
-        # ========================================================================
-        
-        link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
-        
-        try:
-            await context.bot.send_message(
-                chat_id=driver_tid,
-                text=(
-                    f"🎯 *Nova Rota Atribuída!*\n\n"
-                    f"📦 Rota: *{route_name}*\n"
-                    f"📊 Total de Pacotes: *{count}*\n"
-                    f"🗺️ Mapa Interativo: [Clique Aqui]({link})\n"
-                    f"{opt_msg}\n\n"
-                    f"💡 _Abra o mapa para ver todas as entregas e começar!_"
-                ),
-                parse_mode='Markdown',
-                disable_web_page_preview=True
-            )
-            await query.edit_message_text(
-                f"✅ *Rota Enviada com Sucesso!*\n\n"
-                f"📦 *Rota:* {route_name}\n"
-                f"👤 *Motorista:* {driver_name}\n"
-                f"📊 *Pacotes:* {count}\n"
-                f"{opt_msg}\n\n"
-                f"🗺️ *Link de Rastreamento:*\n"
-                f"{link}\n\n"
-                f"💡 _Use este link para acompanhar em tempo real!_",
-                parse_mode='Markdown'
-            )
-        except Exception:
-            await query.edit_message_text(
-                "⚠️ *Erro ao Enviar*\n\n"
-                "Não consegui enviar a mensagem ao motorista.\n\n"
-                "Possíveis causas:\n"
-                "• O motorista ainda não iniciou conversa com o bot\n"
-                "• O ID do motorista está incorreto\n\n"
-                "💡 Peça ao motorista para enviar /start no bot.",
-                parse_mode='Markdown'
-            )
-    finally:
-        db.close()
-    context.user_data.pop("send_route_id", None)
-    return ConversationHandler.END
 
 
 async def on_delete_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
