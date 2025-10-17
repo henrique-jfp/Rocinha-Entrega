@@ -181,6 +181,45 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="No location yet")
         return data
 
+    class MarkDeliveredIn(BaseModel):
+        status: str = "delivered"
+
+    @app.post("/package/{package_id}/mark-delivered")
+    def mark_package_delivered(package_id: int, body: MarkDeliveredIn, db=Depends(get_db_session)):
+        """Marca um pacote como entregue diretamente do mapa"""
+        try:
+            package = db.query(Package).filter(Package.id == package_id).first()
+            if not package:
+                raise HTTPException(status_code=404, detail=f"Pacote {package_id} não encontrado")
+            
+            print(f"📦 Marcando pacote {package_id} como {body.status}...")
+            
+            # Atualiza status
+            old_status = package.status
+            package.status = body.status
+            db.add(package)
+            db.commit()
+            db.refresh(package)
+            
+            print(f"✅ Pacote {package_id}: {old_status} → {body.status}")
+            
+            return {
+                "success": True,
+                "package_id": package.id,
+                "tracking_code": package.tracking_code,
+                "old_status": old_status,
+                "new_status": body.status,
+                "message": f"Pacote {package.tracking_code} marcado como {body.status}"
+            }
+        
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"❌ Erro ao marcar pacote: {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Erro ao atualizar pacote: {str(e)}")
+
     class GroupTokenIn(BaseModel):
         package_ids: List[int]
 

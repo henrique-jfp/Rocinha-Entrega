@@ -353,21 +353,63 @@
     badge.className = 'status-badge';
     badge.textContent = getStatusText(pkg.status);
 
+    // Botão de ação (Marcar Entregue ou Navegar)
+    const actionBtn = document.createElement('button');
+    actionBtn.className = 'action-btn';
+    actionBtn.style.cssText = `
+      padding: 6px 12px;
+      margin-left: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    `;
+    
+    if (pkg.status === 'pending') {
+      actionBtn.textContent = '✅ Marcar Entregue';
+      actionBtn.style.background = '#10b981';
+      actionBtn.style.color = 'white';
+      actionBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await markPackageDelivered(pkg.id);
+      });
+    } else if (pkg.status === 'delivered') {
+      actionBtn.textContent = '✔️ Entregue';
+      actionBtn.style.background = '#d1d5db';
+      actionBtn.style.color = '#666';
+      actionBtn.disabled = true;
+    } else if (pkg.status === 'failed') {
+      actionBtn.textContent = '❌ Falhou';
+      actionBtn.style.background = '#ef4444';
+      actionBtn.style.color = 'white';
+      actionBtn.disabled = true;
+    }
+
     const navBtn = document.createElement('a');
     navBtn.className = 'nav-btn';
-    navBtn.textContent = '→';
-    navBtn.title = 'Navegar';
+    navBtn.textContent = '🗺️';
+    navBtn.title = 'Navegar no Google Maps';
     navBtn.href = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
     navBtn.target = '_blank';
     navBtn.rel = 'noopener';
+    navBtn.style.cssText = `
+      padding: 6px 10px;
+      margin-left: 4px;
+      text-decoration: none;
+      display: inline-block;
+    `;
 
     li.appendChild(pinNum);
     li.appendChild(info);
     li.appendChild(badge);
+    li.appendChild(actionBtn);
     li.appendChild(navBtn);
 
     li.addEventListener('click', (e)=>{
-      if(e.target.tagName.toLowerCase() === 'a') return;
+      if(e.target.tagName.toLowerCase() === 'a' || e.target.tagName.toLowerCase() === 'button') return;
       if(marker){
         map.flyTo(marker.getLatLng(), 16, { duration: 0.5 });
         setTimeout(() => marker.openPopup(), 600);
@@ -375,6 +417,36 @@
     });
 
     return li;
+  }
+
+  // Função para marcar pacote como entregue
+  async function markPackageDelivered(packageId) {
+    try {
+      console.log(`📦 Marcando pacote ${packageId} como entregue...`);
+      
+      const response = await fetch(`${baseUrl}/package/${packageId}/mark-delivered`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'delivered' })
+      });
+      
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Erro ${response.status}: ${error}`);
+      }
+      
+      const result = await response.json();
+      console.log('✅ Pacote marcado como entregue:', result);
+      
+      showUpdateNotification('✅ Entrega registrada com sucesso!', 'success');
+      
+      // Recarrega pacotes para atualizar UI
+      setTimeout(() => loadPackages(), 500);
+      
+    } catch (err) {
+      console.error('❌ Erro ao marcar entrega:', err);
+      showUpdateNotification(`❌ Erro: ${err.message}`, 'error');
+    }
   }
 
   // Mostra notificação de atualização
