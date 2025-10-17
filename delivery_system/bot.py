@@ -51,13 +51,17 @@ DEPOT_LAT = float(os.getenv("DEPOT_LAT", "-22.988000"))  # Exemplo: Rocinha, RJ
 DEPOT_LON = float(os.getenv("DEPOT_LON", "-43.248000"))
 
 # Configurar Gemini API
+# Configurar Gemini API
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
-    genai.configure(api_key=GEMINI_API_KEY)
-    # Usar gemini-pro (modelo estável compatível com API v1beta)
-    gemini_model = genai.GenerativeModel('gemini-pro')
-else:
-    gemini_model = None
+# TEMPORARIAMENTE DESABILITADO - Modelo incompatível com API v1beta
+# TODO: Descobrir modelo correto para google-generativeai==0.8.3
+gemini_model = None
+# if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
+#     genai.configure(api_key=GEMINI_API_KEY)
+#     # Usar gemini-pro (modelo estável compatível com API v1beta)
+#     gemini_model = genai.GenerativeModel('gemini-pro')
+# else:
+#     gemini_model = None
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 
@@ -848,21 +852,9 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Verifica se Gemini está configurado
-        if not gemini_model:
-            await update.message.reply_text(
-                "⚠️ *IA Não Configurada*\n\n"
-                "Configure a chave da API Gemini no arquivo `.env`:\n"
-                "`GEMINI_API_KEY=sua_chave_aqui`\n\n"
-                "Obtenha sua chave gratuita em:\n"
-                "https://aistudio.google.com/app/apikey",
-                parse_mode='Markdown'
-            )
-            return
-        
         # Envia mensagem de processamento
         processing_msg = await update.message.reply_text(
-            "🤖 *Gerando Relatório...*\n\n"
+            "📊 *Gerando Relatório...*\n\n"
             "⏳ Coletando dados financeiros e de entregas...",
             parse_mode='Markdown'
         )
@@ -925,60 +917,82 @@ Gere o relatório agora:"""
 
         # Atualiza mensagem
         await processing_msg.edit_text(
-            "🤖 *Gerando Relatório...*\n\n"
-            "🧠 IA analisando dados...",
+            "📊 *Gerando Relatório...*\n\n"
+            "📈 Analisando dados...",
             parse_mode='Markdown'
         )
         
-        # Gera relatório com Gemini
-        try:
-            response = gemini_model.generate_content(prompt)
-            ai_analysis = response.text
-            
-            # Salva no banco
-            report = AIReport(
-                user_id=me.id,
-                report_type="monthly_financial",
-                prompt_data=prompt,
-                ai_response=ai_analysis
-            )
-            db.add(report)
-            db.commit()
-            
-            # Divide relatório em mensagens (limite Telegram: 4096 chars)
-            max_length = 4000
-            if len(ai_analysis) <= max_length:
-                await processing_msg.edit_text(
-                    f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{ai_analysis}",
-                    parse_mode='Markdown'
-                )
-            else:
-                # Envia em partes
-                await processing_msg.delete()
-                parts = [ai_analysis[i:i+max_length] for i in range(0, len(ai_analysis), max_length)]
+        # Tenta gerar relatório com Gemini (se disponível)
+        ai_report_generated = False
+        if gemini_model:
+            try:
+                response = gemini_model.generate_content(prompt)
+                ai_analysis = response.text
                 
+                # Salva no banco
+                report = AIReport(
+                    user_id=me.id,
+                    report_type="monthly_financial",
+                    prompt_data=prompt,
+                    ai_response=ai_analysis
+                )
+                db.add(report)
+                db.commit()
+                
+                # Divide relatório em mensagens (limite Telegram: 4096 chars)
+                max_length = 4000
+                if len(ai_analysis) <= max_length:
+                    await processing_msg.edit_text(
+                        f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{ai_analysis}",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    # Envia em partes
+                    await processing_msg.delete()
+                    parts = [ai_analysis[i:i+max_length] for i in range(0, len(ai_analysis), max_length)]
+                    
+                    await update.message.reply_text(
+                        f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{parts[0]}",
+                        parse_mode='Markdown'
+                    )
+                    
+                    for part in parts[1:]:
+                        await update.message.reply_text(part, parse_mode='Markdown')
+                
+                # Mensagem final
                 await update.message.reply_text(
-                    f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{parts[0]}",
+                    "✅ *Relatório salvo!*\n\n"
+                    f"🤖 Gerado por IA Gemini\n"
+                    f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
+                    "_Use /relatorio novamente para atualizar._",
                     parse_mode='Markdown'
                 )
+                ai_report_generated = True
                 
-                for part in parts[1:]:
-                    await update.message.reply_text(part, parse_mode='Markdown')
-            
-            # Mensagem final
-            await update.message.reply_text(
-                "✅ *Relatório salvo!*\n\n"
-                f"🤖 Gerado por IA Gemini\n"
-                f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
-                "_Use /relatorio novamente para atualizar._",
-                parse_mode='Markdown'
-            )
-            
-        except Exception as e:
+            except Exception as e:
+                # Falha na IA - vai gerar relatório simples abaixo
+                error_msg = str(e)
+                print(f"Erro no Gemini: {error_msg}")  # Log para debug
+        
+        # Se IA falhou ou não está disponível, gera relatório simples
+        if not ai_report_generated:
             await processing_msg.edit_text(
-                f"❌ *Erro ao gerar relatório*\n\n"
-                f"Detalhes: {str(e)}\n\n"
-                f"Verifique sua chave da API Gemini.",
+                f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n"
+                f"⚠️ _Relatório básico (IA indisponível)_\n\n"
+                f"📦 *ENTREGAS*\n"
+                f"• Total: {total_packages} pacotes\n"
+                f"• Entregues: {delivered_packages} ({(delivered_packages/total_packages*100 if total_packages > 0 else 0):.1f}%)\n"
+                f"• Falhas: {failed_packages}\n\n"
+                f"🚚 *OPERAÇÕES*\n"
+                f"• Rotas criadas: {total_routes}\n"
+                f"• Motoristas ativos: {active_drivers}\n"
+                f"• Média: {(total_packages/total_routes if total_routes > 0 else 0):.1f} pacotes/rota\n\n"
+                f"💰 *REGISTROS FINANCEIROS*\n"
+                f"• Receitas: {total_income} registros\n"
+                f"• Despesas: {total_expenses} registros\n"
+                f"• Quilometragem: {total_mileage} registros\n\n"
+                f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
+                f"_Configure GEMINI_API_KEY para análise com IA_",
                 parse_mode='Markdown'
             )
     
