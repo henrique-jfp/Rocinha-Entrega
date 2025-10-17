@@ -1,28 +1,35 @@
 (function(){
-  const body = document.body;
-  const routeId = Number(body.getAttribute('data-route-id'));
-  const driverId = Number(body.getAttribute('data-driver-id'));
-  const botUsername = body.getAttribute('data-bot-username') || 'SEU_BOT_USERNAME';
-  const baseUrl = body.getAttribute('data-base-url') || '';
+  try {
+    console.log('🚀 Map script iniciado');
+    
+    const body = document.body;
+    const routeId = Number(body.getAttribute('data-route-id'));
+    const driverId = Number(body.getAttribute('data-driver-id'));
+    const botUsername = body.getAttribute('data-bot-username') || 'SEU_BOT_USERNAME';
+    const baseUrl = body.getAttribute('data-base-url') || '';
+    
+    console.log('📍 Variáveis carregadas:', { routeId, driverId, botUsername, baseUrl });
 
-  // Initialize map with detailed CARTO Voyager layer (best for Rocinha)
-  const map = L.map('map', {
-    center: [-22.9, -43.2],
-    zoom: 12,
-    zoomControl: true
-  });
-  
-  // Usar OpenStreetMap com mais detalhes (similar ao Google Maps)
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(map);
+    // Initialize map with detailed CARTO Voyager layer (best for Rocinha)
+    const map = L.map('map', {
+      center: [-22.9, -43.2],
+      zoom: 12,
+      zoomControl: true
+    });
+    
+    console.log('✅ Mapa Leaflet inicializado');
+    
+    // Usar OpenStreetMap com mais detalhes (similar ao Google Maps)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
 
-  const markersLayer = L.layerGroup().addTo(map);
-  const myLocationLayer = L.layerGroup().addTo(map);
+    const markersLayer = L.layerGroup().addTo(map);
+    const myLocationLayer = L.layerGroup().addTo(map);
 
-  // Armazena estado anterior para detectar mudanças
-  let previousPackageStates = {};
+    // Armazena estado anterior para detectar mudanças
+    let previousPackageStates = {};
 
   // Função para calcular distância entre dois pontos (em metros)
   function getDistance(lat1, lng1, lat2, lng2) {
@@ -657,4 +664,10 @@
     searchInput.dispatchEvent(new Event('input'));
     searchInput.focus();
   });
+  
+  } catch(err) {
+    console.error('❌ Erro fatal no map script:', err);
+    console.error('Stack:', err.stack);
+    document.getElementById('counter').textContent = `Erro ao inicializar mapa: ${err.message}`;
+  }
 })();
