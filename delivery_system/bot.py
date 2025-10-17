@@ -5,7 +5,7 @@ from typing import Optional, List
 from math import radians, sin, cos, sqrt, asin
 
 import pandas as pd
-import google.generativeai as genai
+from groq import Groq
 from dotenv import load_dotenv
 from telegram import (
     Update,
@@ -51,17 +51,14 @@ DEPOT_LAT = float(os.getenv("DEPOT_LAT", "-22.988000"))  # Exemplo: Rocinha, RJ
 DEPOT_LON = float(os.getenv("DEPOT_LON", "-43.248000"))
 
 # Configurar Gemini API
-# Configurar Gemini API
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# TEMPORARIAMENTE DESABILITADO - Modelo incompatível com API v1beta
-# TODO: Descobrir modelo correto para google-generativeai==0.8.3
-gemini_model = None
-# if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
-#     genai.configure(api_key=GEMINI_API_KEY)
-#     # Usar gemini-pro (modelo estável compatível com API v1beta)
-#     gemini_model = genai.GenerativeModel('gemini-pro')
-# else:
-#     gemini_model = None
+# Configurar Groq API (substitui Gemini)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if GROQ_API_KEY:
+    groq_client = Groq(api_key=GROQ_API_KEY)
+    ai_model_name = "llama-3.1-70b-versatile"  # Modelo rápido e inteligente
+else:
+    groq_client = None
+    ai_model_name = None
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 
@@ -922,12 +919,28 @@ Gere o relatório agora:"""
             parse_mode='Markdown'
         )
         
-        # Tenta gerar relatório com Gemini (se disponível)
+        # Tenta gerar relatório com Groq IA (se disponível)
         ai_report_generated = False
-        if gemini_model:
+        if groq_client:
             try:
-                response = gemini_model.generate_content(prompt)
-                ai_analysis = response.text
+                # Chama API Groq
+                response = groq_client.chat.completions.create(
+                    model=ai_model_name,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Você é um analista financeiro especializado em logística e entregas. Forneça análises profissionais, objetivas e acionáveis em português do Brasil."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                
+                ai_analysis = response.choices[0].message.content
                 
                 # Salva no banco
                 report = AIReport(
@@ -962,7 +975,7 @@ Gere o relatório agora:"""
                 # Mensagem final
                 await update.message.reply_text(
                     "✅ *Relatório salvo!*\n\n"
-                    f"🤖 Gerado por IA Gemini\n"
+                    f"🤖 Gerado por IA Groq (Llama 3.1)\n"
                     f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
                     "_Use /relatorio novamente para atualizar._",
                     parse_mode='Markdown'
@@ -972,7 +985,7 @@ Gere o relatório agora:"""
             except Exception as e:
                 # Falha na IA - vai gerar relatório simples abaixo
                 error_msg = str(e)
-                print(f"Erro no Gemini: {error_msg}")  # Log para debug
+                print(f"Erro no Groq: {error_msg}")  # Log para debug
         
         # Se IA falhou ou não está disponível, gera relatório simples
         if not ai_report_generated:
@@ -992,7 +1005,7 @@ Gere o relatório agora:"""
                 f"• Despesas: {total_expenses} registros\n"
                 f"• Quilometragem: {total_mileage} registros\n\n"
                 f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
-                f"_Configure GEMINI_API_KEY para análise com IA_",
+                f"_Configure GROQ_API_KEY para análise com IA_",
                 parse_mode='Markdown'
             )
     
