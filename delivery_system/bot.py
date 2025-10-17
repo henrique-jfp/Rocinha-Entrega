@@ -3766,16 +3766,32 @@ async def cmd_meus_registros(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
         
-        # Busca todos os registros do mês (Mileage, Expense, Income)
+        # Busca TODAS as datas que têm registros financeiros (Mileage, Expense, Income)
         now = datetime.now()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         
-        mileage_records = db.query(Mileage).filter(
+        # Busca datas em Mileage, Expense e Income
+        mileage_dates = db.query(Mileage.date).filter(
             Mileage.date >= month_start.date(),
             Mileage.created_by == user.id
-        ).order_by(Mileage.date.desc()).all()
+        ).all()
         
-        if not mileage_records:
+        expense_dates = db.query(Expense.date).filter(
+            Expense.date >= month_start.date(),
+            Expense.created_by == user.id
+        ).all()
+        
+        income_dates = db.query(Income.date).filter(
+            Income.date >= month_start.date(),
+            Income.created_by == user.id
+        ).all()
+        
+        # Combina todas as datas únicas
+        all_dates = set()
+        for date_tuple in mileage_dates + expense_dates + income_dates:
+            all_dates.add(date_tuple[0])
+        
+        if not all_dates:
             await update.message.reply_text(
                 "📭 *Nenhum Registro Encontrado*\n\n"
                 "Você não tem registros financeiros neste mês.\n\n"
@@ -3784,19 +3800,27 @@ async def cmd_meus_registros(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
         
+        # Ordena datas em ordem decrescente
+        sorted_dates = sorted(all_dates, reverse=True)
+        
         # Cria keyboard com datas dos registros
         keyboard = []
-        for record in mileage_records[:30]:  # Limita a 30
-            date_str = record.date.strftime("%d/%m/%Y")
+        for record_date in sorted_dates[:30]:  # Limita a 30
+            date_str = record_date.strftime("%d/%m/%Y")
             
             # Busca dados associados a essa data
+            mileage_day = db.query(Mileage).filter(
+                Mileage.date == record_date,
+                Mileage.created_by == user.id
+            ).first()
+            
             expenses_day = db.query(Expense).filter(
-                Expense.date == record.date,
+                Expense.date == record_date,
                 Expense.created_by == user.id
             ).all()
             
             income_day = db.query(Income).filter(
-                Income.date == record.date,
+                Income.date == record_date,
                 Income.created_by == user.id
             ).all()
             
@@ -3807,10 +3831,17 @@ async def cmd_meus_registros(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Determina emoji baseado no balance
             emoji = "💚" if balance >= 0 else "❌"
             
+            # Se tem Mileage, usa o ID dele; senão, cria um ID virtual com a data
+            if mileage_day:
+                callback_id = f"view_fin_record:{mileage_day.id}"
+            else:
+                # Cria ID virtual: "date_YYYYMMDD"
+                callback_id = f"view_fin_record_by_date:{record_date.strftime('%Y%m%d')}"
+            
             keyboard.append([
                 InlineKeyboardButton(
                     text=f"{emoji} {date_str} - R$ {balance:,.2f}",
-                    callback_data=f"view_fin_record:{record.id}"
+                    callback_data=callback_id
                 )
             ])
         
@@ -3832,22 +3863,29 @@ async def on_view_fin_record(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     
     data = query.data or ""
-    if not data.startswith("view_fin_record:"):
-        return
     
-    mileage_id = int(data.split(":", 1)[1])
-    context.user_data['view_fin_record_id'] = mileage_id
+    # Suporta dois formatos: por ID de Mileage ou por data
+    if data.startswith("view_fin_record:"):
+        mileage_id = int(data.split(":", 1)[1])
+        db = SessionLocal()
+        try:
+            mileage = db.get(Mileage, mileage_id)
+            if not mileage:
+                await query.answer("❌ Registro não encontrado!", show_alert=True)
+                return
+            record_date = mileage.date
+            user_id = mileage.created_by
+        finally:
+            db.close()
+    elif data.startswith("view_fin_record_by_date:"):
+        date_str = data.split(":", 1)[1]
+        record_date = datetime.strptime(date_str, "%Y%m%d").date()
+        user_id = update.effective_user.id
+    else:
+        return
     
     db = SessionLocal()
     try:
-        mileage = db.get(Mileage, mileage_id)
-        if not mileage:
-            await query.answer("❌ Registro não encontrado!", show_alert=True)
-            return
-        
-        user_id = mileage.created_by
-        record_date = mileage.date
-        
         # Busca dados do dia
         expenses_day = db.query(Expense).filter(
             Expense.date == record_date,
@@ -3859,13 +3897,22 @@ async def on_view_fin_record(update: Update, context: ContextTypes.DEFAULT_TYPE)
             Income.created_by == user_id
         ).all()
         
+        mileage_day = db.query(Mileage).filter(
+            Mileage.date == record_date,
+            Mileage.created_by == user_id
+        ).first()
+        
         total_income = sum(inc.amount for inc in income_day)
         total_expenses = sum(exp.amount for exp in expenses_day)
         balance = total_income - total_expenses
         
         # Monta detalhes
         details = f"📊 *Registro - {record_date.strftime('%d/%m/%Y')}*\n\n"
-        details += f"🚗 *KM Rodados:* {mileage.km_total} km\n\n"
+        
+        if mileage_day:
+            details += f"🚗 *KM Rodados:* {mileage_day.km_total} km\n\n"
+        else:
+            details += f"🚗 *KM Rodados:* Não registrado\n\n"
         
         # Combustível
         fuel_expenses = [e for e in expenses_day if e.type == 'combustivel']
@@ -3903,13 +3950,23 @@ async def on_view_fin_record(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if balance < 0:
             details += " ⚠️"
         
-        if mileage.notes:
-            details += f"\n\n📝 *Observações:* {mileage.notes}"
+        if mileage_day and mileage_day.notes:
+            details += f"\n\n📝 *Observações:* {mileage_day.notes}"
         
         # Keyboard com opções
+        if mileage_day:
+            mileage_id = mileage_day.id
+            edit_callback = f"edit_fin_record:{mileage_id}"
+            delete_callback = f"delete_fin_record:{mileage_id}"
+        else:
+            # Para registros sem Mileage, usa a data
+            date_str = record_date.strftime("%Y%m%d")
+            edit_callback = f"edit_fin_record_date:{date_str}"
+            delete_callback = f"delete_fin_record_date:{date_str}"
+        
         keyboard = [
-            [InlineKeyboardButton(text="✏️ Editar", callback_data=f"edit_fin_record:{mileage_id}")],
-            [InlineKeyboardButton(text="🗑️ Excluir", callback_data=f"delete_fin_record:{mileage_id}")],
+            [InlineKeyboardButton(text="✏️ Editar", callback_data=edit_callback)],
+            [InlineKeyboardButton(text="🗑️ Excluir", callback_data=delete_callback)],
             [InlineKeyboardButton(text="⬅️ Voltar", callback_data="back_to_fin_records")]
         ]
         
@@ -3959,46 +4016,51 @@ async def on_delete_fin_record(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     
     data = query.data or ""
-    if not data.startswith("delete_fin_record:"):
+    
+    # Suporta dois formatos
+    if data.startswith("delete_fin_record:"):
+        mileage_id = int(data.split(":", 1)[1])
+        db = SessionLocal()
+        try:
+            mileage = db.get(Mileage, mileage_id)
+            if not mileage:
+                await query.answer("❌ Registro não encontrado!", show_alert=True)
+                return
+            record_date = mileage.date
+            callback_confirm = f"confirm_delete_fin:{mileage_id}"
+            callback_cancel = f"view_fin_record:{mileage_id}"
+        finally:
+            db.close()
+    elif data.startswith("delete_fin_record_date:"):
+        date_str = data.split(":", 1)[1]
+        record_date = datetime.strptime(date_str, "%Y%m%d").date()
+        callback_confirm = f"confirm_delete_fin_date:{date_str}"
+        callback_cancel = f"view_fin_record_by_date:{date_str}"
+    else:
         return
     
-    mileage_id = int(data.split(":", 1)[1])
-    
-    db = SessionLocal()
-    try:
-        mileage = db.get(Mileage, mileage_id)
-        if not mileage:
-            await query.answer("❌ Registro não encontrado!", show_alert=True)
-            return
-        
-        record_date = mileage.date
-        user_id = mileage.created_by
-        
-        # Confirma exclusão
-        keyboard = [
-            [
-                InlineKeyboardButton(text="⚠️ SIM, Excluir", callback_data=f"confirm_delete_fin:{mileage_id}"),
-                InlineKeyboardButton(text="❌ Cancelar", callback_data=f"view_fin_record:{mileage_id}")
-            ]
+    # Confirma exclusão
+    keyboard = [
+        [
+            InlineKeyboardButton(text="⚠️ SIM, Excluir", callback_data=callback_confirm),
+            InlineKeyboardButton(text="❌ Cancelar", callback_data=callback_cancel)
         ]
-        
-        await query.edit_message_text(
-            f"🗑️ *EXCLUIR REGISTRO*\n\n"
-            f"Data: {record_date.strftime('%d/%m/%Y')}\n\n"
-            f"⚠️ *Isso vai apagar:*\n"
-            f"  • Quilometragem registrada\n"
-            f"  • Todos os ganhos do dia\n"
-            f"  • Todos os salários pagos\n"
-            f"  • Todas as despesas\n"
-            f"  • Observações\n\n"
-            f"*Esta ação NÃO pode ser desfeita!*\n\n"
-            f"Tem certeza?",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-        
-    finally:
-        db.close()
+    ]
+    
+    await query.edit_message_text(
+        f"🗑️ *EXCLUIR REGISTRO*\n\n"
+        f"Data: {record_date.strftime('%d/%m/%Y')}\n\n"
+        f"⚠️ *Isso vai apagar:*\n"
+        f"  • Quilometragem registrada\n"
+        f"  • Todos os ganhos do dia\n"
+        f"  • Todos os salários pagos\n"
+        f"  • Todas as despesas\n"
+        f"  • Observações\n\n"
+        f"*Esta ação NÃO pode ser desfeita!*\n\n"
+        f"Tem certeza?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
 
 
 async def on_confirm_delete_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4007,46 +4069,80 @@ async def on_confirm_delete_fin(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     
     data = query.data or ""
-    if not data.startswith("confirm_delete_fin:"):
-        return
     
-    mileage_id = int(data.split(":", 1)[1])
+    # Suporta dois formatos
+    if data.startswith("confirm_delete_fin:"):
+        mileage_id = int(data.split(":", 1)[1])
+        db = SessionLocal()
+        try:
+            mileage = db.get(Mileage, mileage_id)
+            if not mileage:
+                await query.answer("❌ Registro não encontrado!", show_alert=True)
+                return
+            
+            record_date = mileage.date
+            user_id = mileage.created_by
+            
+            # Deleta todos os dados do dia
+            db.query(Expense).filter(
+                Expense.date == record_date,
+                Expense.created_by == user_id
+            ).delete()
+            
+            db.query(Income).filter(
+                Income.date == record_date,
+                Income.created_by == user_id
+            ).delete()
+            
+            db.delete(mileage)
+            db.commit()
+            
+            await query.edit_message_text(
+                f"✅ *Registro Excluído!*\n\n"
+                f"O registro de {record_date.strftime('%d/%m/%Y')} foi removido do sistema.\n\n"
+                f"Use /meus_registros para voltar à lista.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
+        finally:
+            db.close()
     
-    db = SessionLocal()
-    try:
-        mileage = db.get(Mileage, mileage_id)
-        if not mileage:
-            await query.answer("❌ Registro não encontrado!", show_alert=True)
-            return
+    elif data.startswith("confirm_delete_fin_date:"):
+        date_str = data.split(":", 1)[1]
+        record_date = datetime.strptime(date_str, "%Y%m%d").date()
+        user_id = update.effective_user.id
         
-        record_date = mileage.date
-        user_id = mileage.created_by
-        
-        # Deleta todos os dados do dia
-        db.query(Expense).filter(
-            Expense.date == record_date,
-            Expense.created_by == user_id
-        ).delete()
-        
-        db.query(Income).filter(
-            Income.date == record_date,
-            Income.created_by == user_id
-        ).delete()
-        
-        db.delete(mileage)
-        db.commit()
-        
-        await query.edit_message_text(
-            f"✅ *Registro Excluído!*\n\n"
-            f"O registro de {record_date.strftime('%d/%m/%Y')} foi removido do sistema.\n\n"
-            f"Use /meus_registros para voltar à lista.",
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
-    finally:
-        db.close()
+        db = SessionLocal()
+        try:
+            # Deleta todos os dados do dia
+            db.query(Expense).filter(
+                Expense.date == record_date,
+                Expense.created_by == user_id
+            ).delete()
+            
+            db.query(Income).filter(
+                Income.date == record_date,
+                Income.created_by == user_id
+            ).delete()
+            
+            db.query(Mileage).filter(
+                Mileage.date == record_date,
+                Mileage.created_by == user_id
+            ).delete()
+            
+            db.commit()
+            
+            await query.edit_message_text(
+                f"✅ *Registro Excluído!*\n\n"
+                f"O registro de {record_date.strftime('%d/%m/%Y')} foi removido do sistema.\n\n"
+                f"Use /meus_registros para voltar à lista.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
+        finally:
+            db.close()
 
 
 async def on_back_to_fin_records(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4094,10 +4190,13 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(on_back_to_routes, pattern=r"^back_to_routes$"))
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
     app.add_handler(CommandHandler("meus_registros", cmd_meus_registros))
-    app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record:\d+$"))
-    app.add_handler(CallbackQueryHandler(on_edit_fin_record, pattern=r"^edit_fin_record:\d+$"))
-    app.add_handler(CallbackQueryHandler(on_delete_fin_record, pattern=r"^delete_fin_record:\d+$"))
-    app.add_handler(CallbackQueryHandler(on_confirm_delete_fin, pattern=r"^confirm_delete_fin:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record:"))
+    app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record_by_date:"))
+    app.add_handler(CallbackQueryHandler(on_edit_fin_record, pattern=r"^edit_fin_record:"))
+    app.add_handler(CallbackQueryHandler(on_delete_fin_record, pattern=r"^delete_fin_record:"))
+    app.add_handler(CallbackQueryHandler(on_delete_fin_record, pattern=r"^delete_fin_record_date:"))
+    app.add_handler(CallbackQueryHandler(on_confirm_delete_fin, pattern=r"^confirm_delete_fin:"))
+    app.add_handler(CallbackQueryHandler(on_confirm_delete_fin, pattern=r"^confirm_delete_fin_date:"))
     app.add_handler(CallbackQueryHandler(on_back_to_fin_records, pattern=r"^back_to_fin_records$"))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
