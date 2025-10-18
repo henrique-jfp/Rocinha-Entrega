@@ -10,25 +10,24 @@
     
     console.log('📍 Variáveis carregadas:', { routeId, driverId, botUsername, baseUrl });
 
-    // Initialize map com estilo moderno escuro
+    // Initialize map - estilo claro e funcional
     const map = L.map('map', {
       center: [-22.9, -43.2],
-      zoom: 12,
+      zoom: 13,
       zoomControl: true,
-      preferCanvas: true // Performance boost
+      preferCanvas: true
     });
     
     console.log('✅ Mapa Leaflet inicializado');
     
-    // Usar CartoDB Dark Matter (estilo moderno escuro) OU CARTO Voyager
-    // Opção 1: Dark Mode (mais moderno)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    // OpenStreetMap padrão - claro, legível, com todas as ruas visíveis
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '© CARTO © OpenStreetMap',
-      subdomains: 'abcd'
+      attribution: '© OpenStreetMap contributors',
+      subdomains: 'abc'
     }).addTo(map);
     
-    // Opção 2: Voyager (claro e detalhado) - descomente para usar
+    // Alternativa: CartoDB Voyager (ainda mais limpo) - descomente para usar
     // L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     //   maxZoom: 19,
     //   attribution: '© CARTO © OpenStreetMap',
@@ -100,157 +99,94 @@
     return clusters;
   }
 
-  // Custom icon com número - DESIGN ULTRA MODERNO 3D
+  // Pins minimalistas e funcionais
   function createNumberedIcon(number, status, isCluster = false){
-    // Cores vibrantes com gradientes
-    let gradient = 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)'; // pending (roxo)
-    let shadowColor = 'rgba(139, 92, 246, 0.5)';
-    let glowColor = '#a78bfa';
+    // Cores sólidas e claras
+    let bgColor = '#2563eb'; // pending (azul)
+    let borderColor = '#1e40af';
     
     if(status === 'delivered') {
-      gradient = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
-      shadowColor = 'rgba(16, 185, 129, 0.5)';
-      glowColor = '#6ee7b7';
+      bgColor = '#16a34a'; // verde
+      borderColor = '#15803d';
     }
     if(status === 'failed') {
-      gradient = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
-      shadowColor = 'rgba(239, 68, 68, 0.5)';
-      glowColor = '#fca5a5';
+      bgColor = '#dc2626'; // vermelho
+      borderColor = '#b91c1c';
     }
     
-    // Se for cluster, usa design de múltiplos pacotes
+    // Cluster - múltiplos pacotes
     if (isCluster) {
       const html = `
-      <div style="position: relative; filter: drop-shadow(0 8px 16px ${shadowColor});">
-        <!-- Pin principal com efeito 3D -->
+      <div style="position: relative;">
         <div style="
-          width: 64px;
-          height: 64px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
-          background: ${gradient};
+          background: ${bgColor};
           color: #fff;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-weight: 900;
-          font-size: 22px;
+          font-weight: 700;
+          font-size: 16px;
           font-family: 'Inter', sans-serif;
-          border: 4px solid #fff;
-          box-shadow: 
-            0 0 0 3px ${glowColor}80,
-            0 4px 12px ${shadowColor},
-            inset 0 2px 4px rgba(255, 255, 255, 0.2),
-            inset 0 -2px 4px rgba(0, 0, 0, 0.2);
-          animation: bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+          border: 3px solid #fff;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         ">
           ${number}
         </div>
-        <!-- Badge de cluster -->
         <div style="
           position: absolute;
-          top: -8px;
-          right: -8px;
-          background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-          color: white;
-          min-width: 28px;
-          height: 28px;
-          border-radius: 14px;
+          top: -4px;
+          right: -4px;
+          background: #eab308;
+          color: #fff;
+          min-width: 20px;
+          height: 20px;
+          border-radius: 10px;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 14px;
-          font-weight: 800;
-          padding: 0 8px;
-          border: 3px solid white;
-          box-shadow: 0 3px 8px rgba(245, 158, 11, 0.5);
-        ">📦</div>
-        <!-- Pulso animado -->
-        <div style="
-          position: absolute;
-          inset: -8px;
-          border-radius: 50%;
-          background: ${glowColor};
-          opacity: 0.3;
-          animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        "></div>
-      </div>
-      <style>
-        @keyframes bounceIn {
-          0% { transform: scale(0); opacity: 0; }
-          50% { transform: scale(1.2); }
-          100% { transform: scale(1); opacity: 1; }
-        }
-        @keyframes pulse {
-          0%, 100% { transform: scale(1); opacity: 0.3; }
-          50% { transform: scale(1.3); opacity: 0; }
-        }
-      </style>`;
+          font-size: 11px;
+          font-weight: 700;
+          padding: 0 6px;
+          border: 2px solid #fff;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        ">+</div>
+      </div>`;
       
       return L.divIcon({
         html: html,
         className: '',
-        iconSize: [64, 64],
-        iconAnchor: [32, 64]
+        iconSize: [44, 44],
+        iconAnchor: [22, 44]
       });
     }
     
-    // Marcador individual com pin em formato de gota 3D
+    // Pin individual - círculo simples
     const html = `
-    <div style="position: relative; filter: drop-shadow(0 6px 12px ${shadowColor});">
-      <!-- Pin em formato de gota com efeito 3D -->
-      <div style="
-        width: 52px;
-        height: 52px;
-        border-radius: 50% 50% 50% 0;
-        background: ${gradient};
-        color: #fff;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: 900;
-        font-size: 18px;
-        font-family: 'Inter', sans-serif;
-        border: 3px solid #fff;
-        box-shadow: 
-          0 0 0 2px ${glowColor}80,
-          0 4px 10px ${shadowColor},
-          inset 0 2px 4px rgba(255, 255, 255, 0.3),
-          inset 0 -2px 4px rgba(0, 0, 0, 0.2);
-        transform: rotate(-45deg);
-        animation: dropIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-      ">
-        <span style="
-          transform: rotate(45deg); 
-          text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-        ">${number}</span>
-      </div>
-      <!-- Sombra do pin -->
-      <div style="
-        position: absolute;
-        bottom: -4px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 20px;
-        height: 4px;
-        background: ${shadowColor};
-        border-radius: 50%;
-        filter: blur(2px);
-      "></div>
-    </div>
-    <style>
-      @keyframes dropIn {
-        0% { transform: rotate(-45deg) translateY(-100px); opacity: 0; }
-        70% { transform: rotate(-45deg) translateY(5px); }
-        100% { transform: rotate(-45deg) translateY(0); opacity: 1; }
-      }
-    </style>`;
+    <div style="
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: ${bgColor};
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      font-family: 'Inter', sans-serif;
+      border: 3px solid #fff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+    ">${number}</div>`;
     
     return L.divIcon({
       html: html,
-      className: 'custom-pin-3d',
-      iconSize: [52, 52],
-      iconAnchor: [26, 52],
-      popupAnchor: [0, -52]
+      className: '',
+      iconSize: [36, 36],
+      iconAnchor: [18, 36]
     });
   }
 
