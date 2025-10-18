@@ -485,15 +485,29 @@
   // Adiciona marcador individual
   function addPackageMarker(pkg, index){
     // Validação robusta de coordenadas
-    if(!pkg.latitude || !pkg.longitude) return null;
-    if(!isFinite(pkg.latitude) || !isFinite(pkg.longitude)) return null;
-    if(Math.abs(pkg.latitude) > 90 || Math.abs(pkg.longitude) > 180) return null;
+    if(!pkg.latitude || !pkg.longitude) {
+      console.warn(`⚠️ Pacote ${pkg.code || 'desconhecido'} sem coordenadas`);
+      return null;
+    }
+    if(!isFinite(pkg.latitude) || !isFinite(pkg.longitude)) {
+      console.warn(`⚠️ Pacote ${pkg.code || 'desconhecido'} com coordenadas inválidas:`, pkg.latitude, pkg.longitude);
+      return null;
+    }
+    if(Math.abs(pkg.latitude) > 90 || Math.abs(pkg.longitude) > 180) {
+      console.warn(`⚠️ Pacote ${pkg.code || 'desconhecido'} com coordenadas fora do intervalo válido`);
+      return null;
+    }
     
-    const icon = createNumberedIcon(index + 1, pkg.status, false, pkg.areaColor);
-    const marker = L.marker([pkg.latitude, pkg.longitude], { icon }).addTo(markersLayer);
-    marker.bindPopup(createPopupHtml(pkg));
-    marker.pkg = pkg;
-    return marker;
+    try {
+      const icon = createNumberedIcon(index + 1, pkg.status, false, pkg.areaColor);
+      const marker = L.marker([pkg.latitude, pkg.longitude], { icon }).addTo(markersLayer);
+      marker.bindPopup(createPopupHtml(pkg));
+      marker.pkg = pkg;
+      return marker;
+    } catch(error) {
+      console.error(`❌ Erro ao criar marker para pacote ${pkg.code || 'desconhecido'}:`, error);
+      return null;
+    }
   }
 
   // Adiciona marcador de cluster
@@ -502,9 +516,18 @@
     const count = packages.length;
     
     // Validação de coordenadas do cluster
-    if(!cluster.lat || !cluster.lng) return null;
-    if(!isFinite(cluster.lat) || !isFinite(cluster.lng)) return null;
-    if(Math.abs(cluster.lat) > 90 || Math.abs(cluster.lng) > 180) return null;
+    if(!cluster.lat || !cluster.lng) {
+      console.warn(`⚠️ Cluster ${clusterIndex} sem coordenadas`);
+      return null;
+    }
+    if(!isFinite(cluster.lat) || !isFinite(cluster.lng)) {
+      console.warn(`⚠️ Cluster ${clusterIndex} com coordenadas inválidas:`, cluster.lat, cluster.lng);
+      return null;
+    }
+    if(Math.abs(cluster.lat) > 90 || Math.abs(cluster.lng) > 180) {
+      console.warn(`⚠️ Cluster ${clusterIndex} com coordenadas fora do intervalo válido`);
+      return null;
+    }
     
     // Determina status dominante do cluster
     const statuses = packages.map(p => p.status);
@@ -515,11 +538,16 @@
     // Usa cor do primeiro pacote do cluster
     const areaColor = packages[0].areaColor || null;
     
-    const icon = createNumberedIcon(clusterIndex + 1, dominantStatus, true, areaColor);
-    const marker = L.marker([cluster.lat, cluster.lng], { icon }).addTo(markersLayer);
-    marker.bindPopup(createClusterPopupHtml(packages), { maxWidth: 340 });
-    marker.cluster = cluster;
-    return marker;
+    try {
+      const icon = createNumberedIcon(clusterIndex + 1, dominantStatus, true, areaColor);
+      const marker = L.marker([cluster.lat, cluster.lng], { icon }).addTo(markersLayer);
+      marker.bindPopup(createClusterPopupHtml(packages), { maxWidth: 340 });
+      marker.cluster = cluster;
+      return marker;
+    } catch(error) {
+      console.error(`❌ Erro ao criar marker do cluster ${clusterIndex}:`, error);
+      return null;
+    }
   }
 
   function getStatusText(status){
