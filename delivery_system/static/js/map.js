@@ -2,6 +2,13 @@
   try {
     console.log('🚀 Map script iniciado');
     
+    // ⚠️ PROTEÇÃO: Evita dupla inicialização
+    if (window.mapInitialized) {
+      console.warn('⚠️ Mapa já inicializado, ignorando nova tentativa');
+      return;
+    }
+    window.mapInitialized = true;
+    
     const body = document.body;
     const routeId = Number(body.getAttribute('data-route-id'));
     const driverId = Number(body.getAttribute('data-driver-id'));
@@ -9,6 +16,14 @@
     const baseUrl = body.getAttribute('data-base-url') || '';
     
     console.log('📍 Variáveis carregadas:', { routeId, driverId, botUsername, baseUrl });
+
+    // Limpa container do mapa se já existir
+    const mapContainer = document.getElementById('map');
+    if (mapContainer._leaflet_id) {
+      console.warn('🗺️ Removendo mapa anterior');
+      mapContainer._leaflet_id = null;
+      mapContainer.innerHTML = '';
+    }
 
     // Initialize map - estilo Google Maps (colorido e claro)
     const map = L.map('map', {
@@ -805,9 +820,31 @@
       const counter = document.getElementById('counter');
       counter.textContent = `${data.length} pacote${data.length !== 1 ? 's' : ''} · ${pending} pendente${pending !== 1 ? 's' : ''} · ${delivered} entregue${delivered !== 1 ? 's' : ''}`;
 
-      if(group.length){
-        const bounds = L.latLngBounds(group);
-        map.fitBounds(bounds.pad(0.1));
+      // Ajusta zoom para mostrar todos os pacotes
+      if(group.length > 0){
+        try {
+          // Filtra coordenadas válidas
+          const validCoords = group.filter(coord => {
+            return coord && 
+                   typeof coord.lat === 'number' && 
+                   typeof coord.lng === 'number' &&
+                   isFinite(coord.lat) && 
+                   isFinite(coord.lng);
+          });
+          
+          if(validCoords.length > 0){
+            const bounds = L.latLngBounds(validCoords);
+            if(bounds.isValid()){
+              map.fitBounds(bounds.pad(0.1));
+              console.log('✅ Zoom ajustado para', validCoords.length, 'pontos');
+            } else {
+              console.warn('⚠️ Bounds inválidos, usando zoom padrão');
+              map.setView(validCoords[0], 13);
+            }
+          }
+        } catch(boundsError) {
+          console.error('❌ Erro ao ajustar bounds:', boundsError);
+        }
       }
       
       // Mostra notificação se houver mudanças
