@@ -639,11 +639,11 @@
       actionBtn.disabled = true;
     }
 
+    // Botão de navegação somente se coordenadas válidas
     const navBtn = document.createElement('a');
     navBtn.className = 'nav-btn';
     navBtn.textContent = '🗺️';
     navBtn.title = 'Navegar no Google Maps';
-    navBtn.href = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
     navBtn.target = '_blank';
     navBtn.rel = 'noopener';
     navBtn.style.cssText = `
@@ -652,6 +652,14 @@
       text-decoration: none;
       display: inline-block;
     `;
+    if (isFinite(pkg.latitude) && isFinite(pkg.longitude) && Math.abs(pkg.latitude) <= 90 && Math.abs(pkg.longitude) <= 180) {
+      navBtn.href = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
+    } else {
+      navBtn.href = '#';
+      navBtn.title = 'Coordenadas indisponíveis';
+      navBtn.style.opacity = '0.4';
+      navBtn.style.pointerEvents = 'none';
+    }
 
     // Botão de Entregar via Telegram (fluxo completo com fotos)
     let deliverBtn = null;
@@ -872,25 +880,42 @@
         try {
           // Filtra coordenadas válidas
           const validCoords = group.filter(coord => {
-            return coord && 
-                   typeof coord.lat === 'number' && 
+            return coord &&
+                   typeof coord.lat === 'number' &&
                    typeof coord.lng === 'number' &&
-                   isFinite(coord.lat) && 
-                   isFinite(coord.lng);
+                   isFinite(coord.lat) &&
+                   isFinite(coord.lng) &&
+                   Math.abs(coord.lat) <= 90 &&
+                   Math.abs(coord.lng) <= 180;
           });
-          
-          if(validCoords.length > 0){
-            const bounds = L.latLngBounds(validCoords);
-            if(bounds.isValid()){
-              map.fitBounds(bounds.pad(0.1));
-              console.log('✅ Zoom ajustado para', validCoords.length, 'pontos');
-            } else {
-              console.warn('⚠️ Bounds inválidos, usando zoom padrão');
-              map.setView(validCoords[0], 13);
+
+          if (validCoords.length === 1) {
+            map.setView(validCoords[0], 15);
+            console.log('✅ Zoom definido em um único ponto');
+          } else if (validCoords.length > 1) {
+            try {
+              const bounds = L.latLngBounds(validCoords);
+              if(bounds.isValid()){
+                map.fitBounds(bounds.pad(0.12));
+                console.log('✅ Zoom ajustado para', validCoords.length, 'pontos');
+              } else {
+                console.warn('⚠️ Bounds inválidos (isValid=false). Fallback setView no primeiro ponto.');
+                map.setView(validCoords[0], 13);
+              }
+            } catch (innerErr) {
+              console.warn('⚠️ fitBounds falhou. Aplicando fallback de média dos pontos.', innerErr);
+              const avg = validCoords.reduce((acc, p) => ({ lat: acc.lat + p.lat, lng: acc.lng + p.lng }), { lat: 0, lng: 0 });
+              avg.lat /= validCoords.length;
+              avg.lng /= validCoords.length;
+              if (isFinite(avg.lat) && isFinite(avg.lng)) {
+                map.setView([avg.lat, avg.lng], 13);
+              }
             }
+          } else {
+            console.warn('⚠️ Nenhuma coordenada válida para ajustar bounds.');
           }
         } catch(boundsError) {
-          console.error('❌ Erro ao ajustar bounds:', boundsError);
+          console.error('❌ Erro ao ajustar bounds (nível externo):', boundsError);
         }
       }
       
@@ -922,26 +947,34 @@
   // Driver location
   let myMarker = null;
   function updateMyMarker(lat, lng){
+    if(!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      console.warn('⚠️ Localização inválida ignorada:', { lat, lng });
+      return;
+    }
     myLocationLayer.clearLayers();
     
     // Círculo azul com pulso
-    const circle = L.circle([lat, lng], {
-      radius: 30,
-      color: '#2563eb',
-      fillColor: '#3b82f6',
-      fillOpacity: 0.3,
-      weight: 2
-    }).addTo(myLocationLayer);
+    try {
+      const circle = L.circle([lat, lng], {
+        radius: 30,
+        color: '#2563eb',
+        fillColor: '#3b82f6',
+        fillOpacity: 0.3,
+        weight: 2
+      }).addTo(myLocationLayer);
 
-    const dot = L.circleMarker([lat, lng], {
-      radius: 8,
-      color: '#fff',
-      fillColor: '#2563eb',
-      fillOpacity: 1,
-      weight: 3
-    }).addTo(myLocationLayer);
+      const dot = L.circleMarker([lat, lng], {
+        radius: 8,
+        color: '#fff',
+        fillColor: '#2563eb',
+        fillOpacity: 1,
+        weight: 3
+      }).addTo(myLocationLayer);
 
-    myMarker = dot;
+      myMarker = dot;
+    } catch (e) {
+      console.error('❌ Erro ao desenhar localização do motorista:', e);
+    }
   }
 
   function postLocation(lat, lng){
