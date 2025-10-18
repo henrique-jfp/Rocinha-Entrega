@@ -332,7 +332,8 @@
   }
 
   function createPopupHtml(pkg){
-    const nav = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
+    const hasValid = isFinite(pkg.latitude) && isFinite(pkg.longitude) && Math.abs(pkg.latitude) <= 90 && Math.abs(pkg.longitude) <= 180;
+    const nav = hasValid ? `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}` : '#';
     
     // Link de entrega via comando /entrega dedicado
     const deliverWeb = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
@@ -353,7 +354,7 @@
           flex-direction: column;
         ">
           <div style="display: flex; gap: 6px;">
-            <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">🧭 Navegar</a>
+            <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="flex: 1; text-align: center; ${hasValid ? '' : 'opacity:0.4; pointer-events:none;'}">🧭 Navegar</a>
             <a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">✓ Entregar</a>
           </div>
           ${pkg.status === 'pending' ? `
@@ -379,7 +380,8 @@
   // Popup para cluster com múltiplos pacotes
   function createClusterPopupHtml(packages){
     const firstPkg = packages[0];
-    const nav = `https://www.google.com/maps?q=${firstPkg.latitude},${firstPkg.longitude}`;
+    const valid = isFinite(firstPkg.latitude) && isFinite(firstPkg.longitude) && Math.abs(firstPkg.latitude) <= 90 && Math.abs(firstPkg.longitude) <= 180;
+    const nav = valid ? `https://www.google.com/maps?q=${firstPkg.latitude},${firstPkg.longitude}` : '#';
     
     const getStatusEmoji = (status) => {
       if(status === 'delivered') return '✅';
@@ -468,7 +470,7 @@
           ${packagesList}
         </div>
         <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; flex-direction: column;">
-          <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="width: 100%; text-align: center;">
+          <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="width: 100%; text-align: center; ${valid ? '' : 'opacity:0.4; pointer-events:none;'}">
             🧭 Navegar para este Endereço
           </a>
           ${pendingIds.length > 0 ? `
