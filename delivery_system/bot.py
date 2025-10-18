@@ -1941,20 +1941,20 @@ async def cmd_configurar_canal_analise(update: Update, context: ContextTypes.DEF
         # Pega o canal_id do usuário se já tem
         if me.channel_id:
             await update.message.reply_text(
-                f"📢 *Canal Configurado*\n\n"
+                "📢 *Canal Configurado*\n\n"
                 f"ID atual: `{me.channel_id}`\n\n"
-                f"📝 *Para mudar*, responda com o novo ID do canal\n"
-                f"(Ex: `-1003024500289`)\n\n"
-                f"💡 Dica: Use /meu_id dentro do canal para pegar o ID",
-                parse_mode='Markdown'
+                "📝 *Para mudar*, responda com o novo ID do canal\n"
+                "(Ex: -1003024500289)\n\n"
+                "💡 Dica: Use /meu\\_id dentro do canal para pegar o ID",
+                parse_mode='MarkdownV2'
             )
         else:
             await update.message.reply_text(
-                f"📢 *Nenhum Canal Configurado*\n\n"
-                f"📝 Responda com o ID do seu canal de análise\n"
-                f"(Ex: `-1003024500289`)\n\n"
-                f"💡 Dica: Use /meu_id dentro do canal para pegar o ID",
-                parse_mode='Markdown'
+                "📢 *Nenhum Canal Configurado*\n\n"
+                "📝 Responda com o ID do seu canal de análise\n"
+                "(Ex: -1003024500289)\n\n"
+                "💡 Dica: Use /meu\\_id dentro do canal para pegar o ID",
+                parse_mode='MarkdownV2'
             )
         
         # Armazena o estado na conversa
@@ -1984,9 +1984,9 @@ async def handle_channel_id_input(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text(
                 "❌ *Formato Inválido*\n\n"
                 "O ID do canal deve ser um número negativo\n"
-                "Ex: `-1003024500289`\n\n"
+                "Ex: \\-1003024500289\n\n"
                 "Tente novamente ou /cancelar",
-                parse_mode='Markdown'
+                parse_mode='MarkdownV2'
             )
             return
         
@@ -1999,10 +1999,10 @@ async def handle_channel_id_input(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.pop('waiting_for_channel_id', None)
         
         await update.message.reply_text(
-            f"✅ *Canal Configurado com Sucesso!*\n\n"
+            "✅ *Canal Configurado com Sucesso\\!*\n\n"
             f"ID: `{channel_id}`\n\n"
-            f"🎉 Agora seus relatórios serão enviados neste canal quando você usar /relatorio",
-            parse_mode='Markdown'
+            "🎉 Agora seus relatórios serão enviados neste canal quando você usar /relatorio",
+            parse_mode='MarkdownV2'
         )
         
     except Exception as e:
