@@ -94,7 +94,9 @@ FIN_INCOME, FIN_SALARY_YN, FIN_SALARY_NAME, FIN_SALARY_AMOUNT, FIN_SALARY_MORE =
 FIN_EXPENSE_CATEGORY, FIN_EXPENSE_AMOUNT, FIN_EXPENSE_MORE, FIN_EXPENSES, FIN_NOTES = range(40, 45)
 
 # Estados para finalização de rota
-FINALIZE_KM, FINALIZE_EXTRA_EXPENSES, FINALIZE_EXTRA_INCOME = range(60, 63)
+FINALIZE_KM = 60
+FINALIZE_EXTRA_EXPENSE_TYPE, FINALIZE_EXTRA_EXPENSE_VALUE, FINALIZE_EXTRA_EXPENSE_MORE = range(61, 64)
+FINALIZE_EXTRA_INCOME_TYPE, FINALIZE_EXTRA_INCOME_VALUE = range(64, 66)
 
 # ==================== CACHE SIMPLES PARA RELATÓRIOS ====================
 # Cache em memória para evitar reprocessar dados que mudam pouco
@@ -1752,7 +1754,7 @@ async def on_finalize_no_expenses(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def on_finalize_add_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Callback para adicionar despesas extras - stub por enquanto"""
+    """Callback para adicionar despesas extras na finalização"""
     query = update.callback_query
     await query.answer()
     
@@ -1762,18 +1764,35 @@ async def on_finalize_add_expenses(update: Update, context: ContextTypes.DEFAULT
     
     route_id = int(data.split(":", 1)[1])
     
-    keyboard = [[InlineKeyboardButton("⬅️ Voltar para Rota", callback_data=f"view_route:{route_id}")]]
+    # Salva route_id e inicializa lista de despesas
+    context.user_data['finalize_route_id'] = route_id
+    if 'finalize_expenses_list' not in context.user_data:
+        context.user_data['finalize_expenses_list'] = []
+    
+    keyboard = [
+        ['⛽ Combustível', '🅿️ Estacionamento'],
+        ['🛣️ Pedágio', '🔧 Manutenção'],
+        ['🚗 Outro'],
+        ['✅ Finalizar (sem mais despesas)']
+    ]
     
     await query.edit_message_text(
-        "🚧 *Funcionalidade em desenvolvimento*\n\n"
-        f"Por enquanto, use /registradia para adicionar despesas extras.",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        "� *Adicionar Despesa Extra*\n\n"
+        "Selecione o tipo de despesa:",
         parse_mode='Markdown'
     )
+    
+    # Envia teclado como mensagem nova (callbacks não suportam ReplyKeyboardMarkup)
+    await update.effective_chat.send_message(
+        "Escolha uma opção:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    )
+    
+    return FINALIZE_EXTRA_EXPENSE_TYPE
 
 
 async def on_finalize_add_income(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Callback para adicionar receita extra - stub por enquanto"""
+    """Callback para adicionar receita extra na finalização"""
     query = update.callback_query
     await query.answer()
     
@@ -1783,14 +1802,238 @@ async def on_finalize_add_income(update: Update, context: ContextTypes.DEFAULT_T
     
     route_id = int(data.split(":", 1)[1])
     
-    keyboard = [[InlineKeyboardButton("⬅️ Voltar para Rota", callback_data=f"view_route:{route_id}")]]
+    # Salva route_id
+    context.user_data['finalize_route_id'] = route_id
+    if 'finalize_income_list' not in context.user_data:
+        context.user_data['finalize_income_list'] = []
+    
+    keyboard = [
+        ['💵 Gorjeta', '📦 Taxa Adicional'],
+        ['💰 Outro'],
+        ['✅ Finalizar (sem receitas extras)']
+    ]
     
     await query.edit_message_text(
-        "🚧 *Funcionalidade em desenvolvimento*\n\n"
-        f"Por enquanto, use /registradia para adicionar receitas extras.",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        "� *Adicionar Receita Extra*\n\n"
+        "Selecione o tipo de receita:",
         parse_mode='Markdown'
     )
+    
+    # Envia teclado como mensagem nova
+    await update.effective_chat.send_message(
+        "Escolha uma opção:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    )
+    
+    return FINALIZE_EXTRA_INCOME_TYPE
+
+
+async def finalize_expense_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe o tipo de despesa extra"""
+    expense_type = update.message.text.strip()
+    
+    # Se usuário escolheu finalizar sem despesas
+    if '✅' in expense_type or 'finalizar' in expense_type.lower():
+        # Calcula total de despesas adicionadas
+        expenses_list = context.user_data.get('finalize_expenses_list', [])
+        total_expenses = sum(exp['amount'] for exp in expenses_list)
+        context.user_data['finalize_extra_expenses'] = total_expenses
+        
+        # Pede KM
+        await update.message.reply_text(
+            "🚗 *Quantos KM você rodou hoje?*\n\n"
+            "_(Considere apenas o deslocamento Ilha ↔ Rocinha)_\n\n"
+            "Digite a kilometragem (ex: 45):",
+            parse_mode='Markdown'
+        )
+        return FINALIZE_KM
+    
+    # Mapeia emojis para tipos
+    type_map = {
+        '⛽': 'combustivel',
+        '🅿️': 'estacionamento',
+        '🛣️': 'pedagio',
+        '🔧': 'manutencao',
+        '🚗': 'outro'
+    }
+    
+    # Encontra o tipo
+    expense_db_type = None
+    for emoji, db_type in type_map.items():
+        if emoji in expense_type:
+            expense_db_type = db_type
+            break
+    
+    if not expense_db_type:
+        expense_db_type = 'outro'
+    
+    context.user_data['finalize_current_expense_type'] = expense_db_type
+    context.user_data['finalize_current_expense_name'] = expense_type
+    
+    await update.message.reply_text(
+        f"💸 *Despesa: {expense_type}*\n\n"
+        "Qual foi o valor? (R$)\n\n"
+        "_(Digite apenas números, ex: 15.50)_",
+        parse_mode='Markdown'
+    )
+    return FINALIZE_EXTRA_EXPENSE_VALUE
+
+
+async def finalize_expense_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe o valor da despesa extra"""
+    try:
+        amount = float(update.message.text.replace(',', '.').replace('R$', '').strip())
+        if amount <= 0:
+            raise ValueError
+        
+        expense_type = context.user_data.get('finalize_current_expense_type', 'outro')
+        expense_name = context.user_data.get('finalize_current_expense_name', 'Outro')
+        
+        # Adiciona à lista
+        if 'finalize_expenses_list' not in context.user_data:
+            context.user_data['finalize_expenses_list'] = []
+        
+        context.user_data['finalize_expenses_list'].append({
+            'type': expense_type,
+            'name': expense_name,
+            'amount': amount
+        })
+        
+        # Mostra resumo
+        expenses_list = context.user_data['finalize_expenses_list']
+        total = sum(exp['amount'] for exp in expenses_list)
+        
+        summary = "\n".join([f"• {exp['name']}: R$ {exp['amount']:.2f}" for exp in expenses_list])
+        
+        keyboard = [
+            ['➕ Adicionar Mais', '✅ Continuar']
+        ]
+        
+        await update.message.reply_text(
+            f"✅ *Despesa Registrada!*\n\n"
+            f"*Despesas adicionadas:*\n{summary}\n\n"
+            f"💰 *Total:* R$ {total:.2f}\n\n"
+            f"Deseja adicionar mais alguma despesa?",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
+            parse_mode='Markdown'
+        )
+        return FINALIZE_EXTRA_EXPENSE_MORE
+        
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Valor inválido. Digite apenas números (ex: 15.50):"
+        )
+        return FINALIZE_EXTRA_EXPENSE_VALUE
+
+
+async def finalize_expense_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pergunta se há mais despesas extras"""
+    resp = update.message.text.strip().lower()
+    
+    if 'mais' in resp or 'adicionar' in resp:
+        # Volta para escolher tipo
+        keyboard = [
+            ['⛽ Combustível', '🅿️ Estacionamento'],
+            ['🛣️ Pedágio', '🔧 Manutenção'],
+            ['🚗 Outro'],
+            ['✅ Finalizar (sem mais despesas)']
+        ]
+        
+        await update.message.reply_text(
+            "💸 *Adicionar Outra Despesa*\n\n"
+            "Selecione o tipo:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
+            parse_mode='Markdown'
+        )
+        return FINALIZE_EXTRA_EXPENSE_TYPE
+    else:
+        # Finaliza despesas e pede KM
+        expenses_list = context.user_data.get('finalize_expenses_list', [])
+        total_expenses = sum(exp['amount'] for exp in expenses_list)
+        context.user_data['finalize_extra_expenses'] = total_expenses
+        
+        await update.message.reply_text(
+            "🚗 *Quantos KM você rodou hoje?*\n\n"
+            "_(Considere apenas o deslocamento Ilha ↔ Rocinha)_\n\n"
+            "Digite a kilometragem (ex: 45):",
+            parse_mode='Markdown'
+        )
+        return FINALIZE_KM
+
+
+async def finalize_income_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe o tipo de receita extra"""
+    income_type = update.message.text.strip()
+    
+    # Se usuário escolheu finalizar sem receitas
+    if '✅' in income_type or 'finalizar' in income_type.lower():
+        # Calcula total de receitas
+        income_list = context.user_data.get('finalize_income_list', [])
+        total_income = sum(inc['amount'] for inc in income_list)
+        context.user_data['finalize_extra_income'] = total_income
+        
+        # Pede KM
+        await update.message.reply_text(
+            "🚗 *Quantos KM você rodou hoje?*\n\n"
+            "_(Considere apenas o deslocamento Ilha ↔ Rocinha)_\n\n"
+            "Digite a kilometragem (ex: 45):",
+            parse_mode='Markdown'
+        )
+        return FINALIZE_KM
+    
+    context.user_data['finalize_current_income_name'] = income_type
+    
+    await update.message.reply_text(
+        f"💵 *Receita: {income_type}*\n\n"
+        "Qual foi o valor? (R$)\n\n"
+        "_(Digite apenas números, ex: 20.00)_",
+        parse_mode='Markdown'
+    )
+    return FINALIZE_EXTRA_INCOME_VALUE
+
+
+async def finalize_income_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe o valor da receita extra"""
+    try:
+        amount = float(update.message.text.replace(',', '.').replace('R$', '').strip())
+        if amount <= 0:
+            raise ValueError
+        
+        income_name = context.user_data.get('finalize_current_income_name', 'Receita Extra')
+        
+        # Adiciona à lista
+        if 'finalize_income_list' not in context.user_data:
+            context.user_data['finalize_income_list'] = []
+        
+        context.user_data['finalize_income_list'].append({
+            'name': income_name,
+            'amount': amount
+        })
+        
+        # Calcula total e pede KM
+        income_list = context.user_data['finalize_income_list']
+        total_income = sum(inc['amount'] for inc in income_list)
+        context.user_data['finalize_extra_income'] = total_income
+        
+        summary = "\n".join([f"• {inc['name']}: R$ {inc['amount']:.2f}" for inc in income_list])
+        
+        await update.message.reply_text(
+            f"✅ *Receita Extra Registrada!*\n\n"
+            f"*Receitas:*\n{summary}\n\n"
+            f"💰 *Total:* R$ {total_income:.2f}\n\n"
+            f"─────────────────\n\n"
+            f"🚗 *Agora, quantos KM você rodou hoje?*\n\n"
+            f"_(Considere apenas o deslocamento Ilha ↔ Rocinha)_\n\n"
+            f"Digite a kilometragem (ex: 45):",
+            parse_mode='Markdown'
+        )
+        return FINALIZE_KM
+        
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Valor inválido. Digite apenas números (ex: 20.00):"
+        )
+        return FINALIZE_EXTRA_INCOME_VALUE
 
 
 async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1819,6 +2062,32 @@ async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             route.calculated_km = km
             route.extra_expenses = extra_expenses
             route.extra_income = extra_income
+            
+            # ✅ FASE 5: Salva despesas extras no banco
+            expenses_list = context.user_data.get('finalize_expenses_list', [])
+            for exp in expenses_list:
+                expense = Expense(
+                    date=datetime.now().date(),
+                    type=exp['type'],
+                    description=f"{exp['name']} - Rota {route_name}",
+                    amount=exp['amount'],
+                    route_id=route_id,
+                    confirmed=True,
+                    created_by=update.effective_user.id
+                )
+                db.add(expense)
+            
+            # ✅ FASE 5: Salva receitas extras no banco
+            income_list = context.user_data.get('finalize_income_list', [])
+            for inc in income_list:
+                income = Income(
+                    date=datetime.now().date(),
+                    description=f"{inc['name']} - Rota {route_name}",
+                    amount=inc['amount'],
+                    route_id=route_id,
+                    created_by=update.effective_user.id
+                )
+                db.add(income)
             
             # ✅ Confirma a despesa de salário
             expenses = db.query(Expense).filter(
@@ -1860,6 +2129,11 @@ async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop('finalize_route_id', None)
             context.user_data.pop('finalize_extra_expenses', None)
             context.user_data.pop('finalize_extra_income', None)
+            context.user_data.pop('finalize_expenses_list', None)
+            context.user_data.pop('finalize_income_list', None)
+            context.user_data.pop('finalize_current_expense_type', None)
+            context.user_data.pop('finalize_current_expense_name', None)
+            context.user_data.pop('finalize_current_income_name', None)
             
         finally:
             db.close()
@@ -5072,12 +5346,19 @@ def setup_bot_handlers(app: Application):
     )
     app.add_handler(config_home_conv)
     
-    # Conversation handler para finalização de rota com entrada de KM
+    # ✅ FASE 5: Conversation handler para finalização de rota (completo)
     finalize_route_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(on_finalize_no_expenses, pattern=r"^finalize_no_expenses:\d+$"),
+            CallbackQueryHandler(on_finalize_add_expenses, pattern=r"^finalize_add_expenses:\d+$"),
+            CallbackQueryHandler(on_finalize_add_income, pattern=r"^finalize_add_income:\d+$"),
         ],
         states={
+            FINALIZE_EXTRA_EXPENSE_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_expense_type)],
+            FINALIZE_EXTRA_EXPENSE_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_expense_value)],
+            FINALIZE_EXTRA_EXPENSE_MORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_expense_more)],
+            FINALIZE_EXTRA_INCOME_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_income_type)],
+            FINALIZE_EXTRA_INCOME_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_income_value)],
             FINALIZE_KM: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_km_input)],
         },
         fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
@@ -5085,10 +5366,6 @@ def setup_bot_handlers(app: Application):
         persistent=False,
     )
     app.add_handler(finalize_route_conv)
-    
-    # Callbacks para adicionar despesas/receitas extras (stub)
-    app.add_handler(CallbackQueryHandler(on_finalize_add_expenses, pattern=r"^finalize_add_expenses:\d+$"))
-    app.add_handler(CallbackQueryHandler(on_finalize_add_income, pattern=r"^finalize_add_income:\d+$"))
     
     # Conversation handler para enviar rota
     send_route_conv = ConversationHandler(
