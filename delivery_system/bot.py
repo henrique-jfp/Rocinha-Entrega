@@ -2760,7 +2760,7 @@ async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     description=f"{exp['name']} - Rota {route_name}",
                     amount=exp['amount'],
                     route_id=route_id,
-                    confirmed=True,
+                    confirmed=1,  # 1 = True (INTEGER)
                     created_by=update.effective_user.id
                 )
                 db.add(expense)
@@ -2780,11 +2780,11 @@ async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # ✅ Confirma a despesa de salário
             expenses = db.query(Expense).filter(
                 Expense.route_id == route_id,
-                Expense.confirmed == False
+                Expense.confirmed == 0  # 0 = False (INTEGER)
             ).all()
             
             for expense in expenses:
-                expense.confirmed = True
+                expense.confirmed = 1  # 1 = True (INTEGER)
             
             # ✅ Marca rota como finalizada
             route.status = "finalized"
@@ -2856,11 +2856,11 @@ async def on_finalize_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
         # ✅ Confirma a despesa de salário
         expenses = db.query(Expense).filter(
             Expense.route_id == route_id,
-            Expense.confirmed == False
+            Expense.confirmed == 0  # 0 = False (INTEGER)
         ).all()
         
         for expense in expenses:
-            expense.confirmed = True
+            expense.confirmed = 1  # 1 = True (INTEGER)
         
         # ✅ Marca rota como finalizada
         route.status = "finalized"
@@ -3604,7 +3604,7 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
             amount=driver_salary,
             employee_name=driver.full_name or f"ID {driver_tid}",
             route_id=route.id,
-            confirmed=False,  # ✅ Só confirma quando finalizar a rota
+            confirmed=0,  # ✅ Só confirma quando finalizar a rota (0 = False, 1 = True)
             created_by=me.telegram_user_id if me else update.effective_user.id
         )
         db.add(expense)
