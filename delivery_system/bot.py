@@ -631,7 +631,7 @@ async def cmd_entrega(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando de ajuda personalizado por role"""
+    """Comando de ajuda interativo com botões por categoria"""
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.telegram_user_id == update.effective_user.id).first()
@@ -645,17 +645,514 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         if user.role == "manager":
-            help_text = (
+            # Menu principal para GERENTE
+            keyboard = [
+                [InlineKeyboardButton("📦 Gestão de Rotas", callback_data="help_manager_routes")],
+                [InlineKeyboardButton("👥 Gestão de Equipe", callback_data="help_manager_team")],
+                [InlineKeyboardButton("💰 Financeiro & IA", callback_data="help_manager_finance")],
+                [InlineKeyboardButton("🚀 Workflow & Dicas", callback_data="help_manager_workflow")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
                 "╔══════════════════════════╗\n"
                 "║  🎯 *CENTRAL DO GERENTE*  ║\n"
                 "╚══════════════════════════╝\n\n"
                 
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "📦 *GESTÃO DE ROTAS*\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "👋 Olá, gerente! Selecione uma categoria abaixo para ver os comandos disponíveis:\n\n"
                 
-                "🆕 */importar*\n"
-                "   └ Importa planilha Excel/CSV\n"
+                "📦 *Gestão de Rotas*\n"
+                "   → Importar, enviar e rastrear rotas\n\n"
+                
+                "👥 *Gestão de Equipe*\n"
+                "   → Cadastrar motoristas e configurar canais\n\n"
+                
+                "💰 *Financeiro & IA*\n"
+                "   → Relatórios, análises e chat inteligente\n\n"
+                
+                "🚀 *Workflow & Dicas*\n"
+                "   → Aprenda o fluxo ideal e dicas avançadas\n\n"
+                
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "💡 *Clique nos botões para explorar!*",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+        else:
+            # Menu principal para MOTORISTA
+            keyboard = [
+                [InlineKeyboardButton("📍 Como Funciona?", callback_data="help_driver_howto")],
+                [InlineKeyboardButton("📸 Processo de Entrega", callback_data="help_driver_delivery")],
+                [InlineKeyboardButton("🗺️ Usar o Mapa", callback_data="help_driver_map")],
+                [InlineKeyboardButton("🔧 Comandos", callback_data="help_driver_commands")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                "╔═══════════════════════════╗\n"
+                "║  🚚 *CENTRAL DO MOTORISTA*  ║\n"
+                "╚═══════════════════════════╝\n\n"
+                
+                "👋 Olá, motorista! Selecione abaixo o que você quer saber:\n\n"
+                
+                "📍 *Como Funciona?*\n"
+                "   → Entenda o fluxo completo\n\n"
+                
+                "📸 *Processo de Entrega*\n"
+                "   → Passo a passo para registrar\n\n"
+                
+                "🗺️ *Usar o Mapa*\n"
+                "   → Recursos e cores dos pins\n\n"
+                
+                "🔧 *Comandos*\n"
+                "   → Lista de comandos disponíveis\n\n"
+                
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "💡 *Clique nos botões para explorar!*",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+        
+    finally:
+        db.close()
+
+
+# ==================== CALLBACKS DO HELP INTERATIVO ====================
+
+async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler para os botões do /help interativo"""
+    query = update.callback_query
+    await query.answer()
+    
+    action = query.data
+    
+    # ========== MANAGER - GESTÃO DE ROTAS ==========
+    if action == "help_manager_routes":
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="help_back_manager")]]
+        await query.edit_message_text(
+            "📦 *GESTÃO DE ROTAS*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "*🆕 /importar*\n"
+            "Importa planilha Excel ou CSV com endereços de entrega.\n"
+            "• Suporta múltiplos formatos\n"
+            "• Geocodificação automática\n"
+            "• Você escolhe o nome da rota\n\n"
+            
+            "*🚚 /enviarrota*\n"
+            "Atribui uma rota para um motorista.\n"
+            "• Otimização automática de percurso\n"
+            "• Gera link de rastreamento\n"
+            "• Notifica motorista no Telegram\n\n"
+            
+            "*🗺️ /rastrear*\n"
+            "Acompanha rotas ativas em tempo real.\n"
+            "• GPS ao vivo do motorista\n"
+            "• Atualização a cada 30 segundos\n"
+            "• Status detalhado de cada entrega\n\n"
+            
+            "*🏁 Finalizar Rota*\n"
+            "Após entregas concluídas, finalize a rota.\n"
+            "• Registra KM rodados\n"
+            "• Adiciona despesas/receitas extras\n"
+            "• Salva tudo automaticamente no banco\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Fluxo:* Importar → Enviar → Rastrear → Finalizar",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    # ========== MANAGER - GESTÃO DE EQUIPE ==========
+    elif action == "help_manager_team":
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="help_back_manager")]]
+        await query.edit_message_text(
+            "👥 *GESTÃO DE EQUIPE*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "*➕ /cadastrardriver*\n"
+            "Adiciona um novo motorista ao sistema.\n"
+            "• Pede Telegram ID e nome completo\n"
+            "• Acesso imediato aos comandos\n"
+            "• Motorista pode começar a trabalhar\n\n"
+            
+            "*📋 /drivers*\n"
+            "Lista todos os motoristas cadastrados.\n"
+            "• 🟢 Em rota / ⚪ Disponível\n"
+            "• Botões: 🗺️ Rastrear | 🗑️ Remover\n"
+            "• Informações de contato\n\n"
+            
+            "*🏠 /configurarcasa*\n"
+            "Define o ponto de partida do motorista.\n"
+            "• Motorista envia localização GPS\n"
+            "• Rotas otimizadas a partir da casa dele\n"
+            "• Economia de combustível e tempo\n\n"
+            
+            "*📢 /configurarcanal*\n"
+            "Canal de provas por motorista.\n"
+            "• Fotos de entregas organizadas\n"
+            "• Um canal dedicado por motorista\n"
+            "• Histórico de provas centralizado\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Dica:* Configure canais separados para melhor organização!",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    # ========== MANAGER - FINANCEIRO & IA ==========
+    elif action == "help_manager_finance":
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="help_back_manager")]]
+        await query.edit_message_text(
+            "💰 *FINANCEIRO & IA*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "*📋 /meus_registros*\n"
+            "Visualiza todos os registros financeiros.\n"
+            "• Ver/editar/deletar dias\n"
+            "• Balanço de lucro por dia\n"
+            "• Integrado com despesas e receitas\n\n"
+            
+            "*🤖 /relatorio*\n"
+            "Relatório inteligente com IA (Groq).\n"
+            "• Análise POR ROTA com margem\n"
+            "• Comparação mês anterior\n"
+            "• Recomendações prescritivas\n"
+            "• Enviado automaticamente ao canal\n\n"
+            
+            "*💬 /chat_ia*\n"
+            "Converse com seus dados!\n"
+            "• Perguntas em linguagem natural\n"
+            "• Contexto de métricas preservado\n"
+            "• Análise profunda e personalizada\n\n"
+            
+            "*📢 /configurar_canal_análise*\n"
+            "Canal dedicado para relatórios automáticos.\n"
+            "• Organiza análises em um lugar\n"
+            "• Histórico centralizado\n"
+            "• Mantém chat privado limpo\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Automação:* Finanças são registradas ao finalizar rotas!",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    # ========== MANAGER - WORKFLOW ==========
+    elif action == "help_manager_workflow":
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="help_back_manager")]]
+        await query.edit_message_text(
+            "🚀 *WORKFLOW RECOMENDADO*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "*FLUXO DIÁRIO:*\n\n"
+            
+            "1️⃣ *Importar Planilha*\n"
+            "   → Use /importar com Excel/CSV\n\n"
+            
+            "2️⃣ *Enviar Rota*\n"
+            "   → Use /enviarrota para atribuir\n\n"
+            
+            "3️⃣ *Rastrear Progresso*\n"
+            "   → Use /rastrear durante o dia\n\n"
+            
+            "4️⃣ *Receber Notificações*\n"
+            "   → Automático a cada entrega\n\n"
+            
+            "5️⃣ *Finalizar Rota*\n"
+            "   → Registra KM, despesas e receitas\n\n"
+            
+            "6️⃣ *Explorar com IA (Opcional)*\n"
+            "   → Use /chat_ia para insights\n\n"
+            
+            "7️⃣ *Analisar Relatórios*\n"
+            "   → Use /relatorio ao fim do dia/mês\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "*💡 DICAS PRO:*\n\n"
+            
+            "✅ Nomeie rotas (ex: Zona Sul, Centro)\n"
+            "✅ Configure canais separados por motorista\n"
+            "✅ Peça motoristas para usar /configurarcasa\n"
+            "✅ Configure /configurar_canal_análise\n"
+            "✅ Finalize rotas para registros automáticos\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "*🎯 RECURSOS AVANÇADOS:*\n\n"
+            
+            "🔹 Otimização automática de rotas\n"
+            "🔹 Rastreamento GPS em tempo real\n"
+            "🔹 Notificações push automáticas\n"
+            "🔹 Análise de IA com comparações\n"
+            "🔹 Automação 100% de finanças\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Outros Comandos:*\n"
+            "/meu_id - Seu Telegram ID\n"
+            "/cancelar - Cancela operação atual",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    # ========== DRIVER - COMO FUNCIONA ==========
+    elif action == "help_driver_howto":
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="help_back_driver")]]
+        await query.edit_message_text(
+            "📍 *COMO FUNCIONA?*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "*PASSO A PASSO:*\n\n"
+            
+            "1️⃣ *Receba a Rota*\n"
+            "Gerente atribui uma rota para você via Telegram.\n\n"
+            
+            "2️⃣ *Abra o Mapa*\n"
+            "Você recebe um link com o mapa interativo 🗺️\n\n"
+            
+            "3️⃣ *Veja os Pacotes*\n"
+            "Mapa mostra todos os pacotes numerados e otimizados.\n\n"
+            
+            "4️⃣ *Navegue até o Local*\n"
+            "Clique no pin e use o botão '🧭 Navegar' para abrir Google Maps.\n\n"
+            
+            "5️⃣ *Registre a Entrega*\n"
+            "Ao chegar, clique em '✓ Entregar' no mapa ou use /entregar.\n\n"
+            
+            "6️⃣ *Envie Comprovantes*\n"
+            "No Telegram: foto do pacote + foto do local + dados do recebedor.\n\n"
+            
+            "7️⃣ *Continue a Rota*\n"
+            "Repita para todos os pacotes até finalizar!\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Dica:* O mapa atualiza sua localização a cada 30 segundos!",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    # ========== DRIVER - PROCESSO DE ENTREGA ==========
+    elif action == "help_driver_delivery":
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="help_back_driver")]]
+        await query.edit_message_text(
+            "📸 *PROCESSO DE ENTREGA*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "*O QUE VOCÊ PRECISA FAZER:*\n\n"
+            
+            "*1️⃣ Foto do Pacote*\n"
+            "📦 Tire uma foto mostrando a etiqueta do pacote de forma clara.\n\n"
+            
+            "*2️⃣ Foto do Local*\n"
+            "🏠 Tire uma foto da porta, fachada ou da pessoa que recebeu.\n\n"
+            
+            "*3️⃣ Nome do Recebedor*\n"
+            "👤 Digite o nome completo de quem assinou/recebeu.\n\n"
+            
+            "*4️⃣ Documento (CPF/RG)*\n"
+            "🆔 Digite CPF ou RG do recebedor.\n"
+            "   → Se não tiver, digite: *sem documento*\n\n"
+            
+            "*5️⃣ Observações (Opcional)*\n"
+            "📝 Adicione informações extras se necessário.\n"
+            "   → Exemplos: 'Porteiro recebeu', 'Deixado na portaria'\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "*⚠️ IMPORTANTE:*\n\n"
+            
+            "✅ Fotos sempre claras e nítidas\n"
+            "✅ Evite fotos borradas ou escuras\n"
+            "✅ Mostre a etiqueta completa\n"
+            "✅ Documento é obrigatório (ou 'sem documento')\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Dica:* Fotos de qualidade evitam problemas futuros!",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    # ========== DRIVER - USAR O MAPA ==========
+    elif action == "help_driver_map":
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="help_back_driver")]]
+        await query.edit_message_text(
+            "🗺️ *RECURSOS DO MAPA*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "*FUNCIONALIDADES:*\n\n"
+            
+            "⏱️ *Atualização Automática*\n"
+            "Mapa se atualiza a cada 30 segundos com sua localização.\n\n"
+            
+            "📍 *Sua Localização*\n"
+            "Você aparece como um marcador azul em tempo real.\n\n"
+            
+            "📊 *Contador de Entregas*\n"
+            "Veja quantos pacotes faltam e quantos foram entregues.\n\n"
+            
+            "🧭 *Navegação Integrada*\n"
+            "Clique em 'Navegar' para abrir Google Maps e traçar rota.\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "*CORES DOS PINS:*\n\n"
+            
+            "🔵 *Azul* → Pacote Pendente\n"
+            "   (Ainda não foi entregue)\n\n"
+            
+            "🟢 *Verde* → Entregue com Sucesso ✅\n"
+            "   (Confirmado com comprovante)\n\n"
+            
+            "🔴 *Vermelho* → Falha na Entrega ❌\n"
+            "   (Cliente ausente, endereço errado, etc)\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "*💡 DICAS:*\n\n"
+            
+            "✅ Mapa funciona offline após carregar\n"
+            "✅ Siga a ordem numérica otimizada\n"
+            "✅ Clique nos pins para ver detalhes\n"
+            "✅ Use zoom para melhor visualização\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Dica:* Mantenha a localização ativada!",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    # ========== DRIVER - COMANDOS ==========
+    elif action == "help_driver_commands":
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="help_back_driver")]]
+        await query.edit_message_text(
+            "🔧 *COMANDOS DISPONÍVEIS*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "*PRINCIPAIS:*\n\n"
+            
+            "*📦 /entregar*\n"
+            "Registra a entrega de um pacote.\n"
+            "• Envia fotos e dados do recebedor\n"
+            "• Gera comprovante automático\n\n"
+            
+            "*🏠 /configurarcasa*\n"
+            "Define seu endereço de partida.\n"
+            "• Envia sua localização GPS\n"
+            "• Rotas otimizadas a partir da sua casa\n"
+            "• Economia de combustível\n\n"
+            
+            "*🆔 /meu_id*\n"
+            "Mostra seu Telegram ID.\n"
+            "• Útil para cadastro com o gerente\n\n"
+            
+            "*❓ /help*\n"
+            "Exibe este menu de ajuda.\n\n"
+            
+            "*🚫 /cancelar*\n"
+            "Cancela a operação atual.\n"
+            "• Use se estiver no meio de um processo\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "*📱 NOTIFICAÇÕES AUTOMÁTICAS:*\n\n"
+            
+            "Você receberá mensagens quando:\n"
+            "• Nova rota for atribuída 🎯\n"
+            "• Entrega for confirmada ✅\n"
+            "• Houver algum problema ⚠️\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "*💡 DICAS:*\n\n"
+            
+            "✅ Configure /configurarcasa primeiro\n"
+            "✅ Use o mapa interativo sempre que possível\n"
+            "✅ Mantenha notificações ativadas\n"
+            "✅ Tire fotos claras e nítidas\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Dúvidas?* Fale com seu gerente!",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    # ========== VOLTAR AO MENU ==========
+    elif action == "help_back_manager":
+        keyboard = [
+            [InlineKeyboardButton("📦 Gestão de Rotas", callback_data="help_manager_routes")],
+            [InlineKeyboardButton("👥 Gestão de Equipe", callback_data="help_manager_team")],
+            [InlineKeyboardButton("💰 Financeiro & IA", callback_data="help_manager_finance")],
+            [InlineKeyboardButton("🚀 Workflow & Dicas", callback_data="help_manager_workflow")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "╔══════════════════════════╗\n"
+            "║  🎯 *CENTRAL DO GERENTE*  ║\n"
+            "╚══════════════════════════╝\n\n"
+            
+            "👋 Olá, gerente! Selecione uma categoria abaixo para ver os comandos disponíveis:\n\n"
+            
+            "📦 *Gestão de Rotas*\n"
+            "   → Importar, enviar e rastrear rotas\n\n"
+            
+            "👥 *Gestão de Equipe*\n"
+            "   → Cadastrar motoristas e configurar canais\n\n"
+            
+            "💰 *Financeiro & IA*\n"
+            "   → Relatórios, análises e chat inteligente\n\n"
+            
+            "🚀 *Workflow & Dicas*\n"
+            "   → Aprenda o fluxo ideal e dicas avançadas\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Clique nos botões para explorar!*",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    
+    elif action == "help_back_driver":
+        keyboard = [
+            [InlineKeyboardButton("📍 Como Funciona?", callback_data="help_driver_howto")],
+            [InlineKeyboardButton("📸 Processo de Entrega", callback_data="help_driver_delivery")],
+            [InlineKeyboardButton("🗺️ Usar o Mapa", callback_data="help_driver_map")],
+            [InlineKeyboardButton("🔧 Comandos", callback_data="help_driver_commands")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "╔═══════════════════════════╗\n"
+            "║  🚚 *CENTRAL DO MOTORISTA*  ║\n"
+            "╚═══════════════════════════╝\n\n"
+            
+            "👋 Olá, motorista! Selecione abaixo o que você quer saber:\n\n"
+            
+            "📍 *Como Funciona?*\n"
+            "   → Entenda o fluxo completo\n\n"
+            
+            "📸 *Processo de Entrega*\n"
+            "   → Passo a passo para registrar\n\n"
+            
+            "🗺️ *Usar o Mapa*\n"
+            "   → Recursos e cores dos pins\n\n"
+            
+            "🔧 *Comandos*\n"
+            "   → Lista de comandos disponíveis\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Clique nos botões para explorar!*",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+
+
+
+
+async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gera relatório financeiro com análise de IA (Gemini)"""
+    db = SessionLocal()
+    try:
+        # Verifica permissão
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem gerar relatórios.",
+                parse_mode='Markdown'
                 "   └ Escolha o nome da rota\n"
                 "   └ Sistema geocodifica endereços\n"
                 "   └ Suporta múltiplos formatos\n\n"
@@ -4752,6 +5249,7 @@ def setup_bot_handlers(app: Application):
     """
     # Comandos básicos
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CallbackQueryHandler(help_callback_handler, pattern=r"^help_"))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
     app.add_handler(CommandHandler("rotas", cmd_rotas))
     app.add_handler(CallbackQueryHandler(on_view_route, pattern=r"^view_route:\d+$"))
