@@ -29,8 +29,7 @@
     const map = L.map('map', {
       center: [-22.9, -43.2],
       zoom: 13,
-      zoomControl: true,
-      preferCanvas: true
+      zoomControl: true
     });
     
     console.log('✅ Mapa Leaflet inicializado');
@@ -896,7 +895,8 @@
             console.log('✅ Zoom definido em um único ponto');
           } else if (validCoords.length > 1) {
             try {
-              const bounds = L.latLngBounds(validCoords);
+              const latLngs = validCoords.map(c => L.latLng(c.lat, c.lng));
+              const bounds = L.latLngBounds(latLngs);
               if(bounds.isValid()){
                 map.fitBounds(bounds.pad(0.12));
                 console.log('✅ Zoom ajustado para', validCoords.length, 'pontos');
@@ -953,29 +953,24 @@
       console.warn('⚠️ Localização inválida ignorada:', { lat, lng });
       return;
     }
-    myLocationLayer.clearLayers();
-    
-    // Círculo azul com pulso
     try {
-      const circle = L.circle([lat, lng], {
-        radius: 30,
-        color: '#2563eb',
-        fillColor: '#3b82f6',
-        fillOpacity: 0.3,
-        weight: 2
-      }).addTo(myLocationLayer);
-
-      const dot = L.circleMarker([lat, lng], {
-        radius: 8,
-        color: '#fff',
-        fillColor: '#2563eb',
-        fillOpacity: 1,
-        weight: 3
-      }).addTo(myLocationLayer);
-
-      myMarker = dot;
+      if (myMarker) {
+        myMarker.setLatLng([lat, lng]);
+      } else {
+        const dotIcon = L.divIcon({
+          className: '',
+          html: `<div style="
+              width: 14px; height: 14px; border-radius: 50%;
+              background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(37,99,235,0.25);
+            "></div>`,
+          iconSize: [14, 14],
+          iconAnchor: [7, 7]
+        });
+        myMarker = L.marker([lat, lng], { icon: dotIcon, keyboard: false, interactive: false });
+        myMarker.addTo(myLocationLayer);
+      }
     } catch (e) {
-      console.error('❌ Erro ao desenhar localização do motorista:', e);
+      console.error('❌ Erro ao posicionar localização do motorista:', e);
     }
   }
 
