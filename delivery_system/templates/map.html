@@ -1,62 +1,122 @@
-<!doctype html><!doctype html><!doctype html>
+<!doctype html><!doctype html><!doctype html><!doctype html>
 
 <html lang="pt-br">
 
-<head><html lang="pt-br"><html lang="pt-br">
+<head><html lang="pt-br">
 
   <meta charset="utf-8" />
 
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" /><head><head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" /><head><html lang="pt-br"><html lang="pt-br">
 
   <meta name="apple-mobile-web-app-capable" content="yes" />
 
-  <meta name="theme-color" content="#ffffff" />  <meta charset="utf-8" />  <meta charset="utf-8" />
+  <meta name="theme-color" content="#ffffff" />  <meta charset="utf-8" />
 
   <title>🗺️ Mapa da Rota</title>
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" />  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" /><head><head>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
 
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>  <meta name="apple-mobile-web-app-capable" content="yes" />  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>  <meta name="apple-mobile-web-app-capable" content="yes" />
 
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/static/css/style.css?v=8" />  <meta name="theme-color" content="#ffffff" />  <meta name="theme-color" content="#0f172a" />
+  <link rel="stylesheet" href="/static/css/style.css?v=9" />  <meta name="theme-color" content="#ffffff" />  <meta charset="utf-8" />  <meta charset="utf-8" />
 
 </head>
 
-<body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}">  <title>🗺️ Mapa da Rota</title>  <title>🗺️ Mapa da Rota</title>
+<body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}">  <title>🗺️ Mapa da Rota</title>
 
-  <!-- Header minimalista -->
+  <!-- Header estilo SPX -->
 
-  <header id="header">  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <header id="header">  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" />  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 
     <div class="header-content">
 
-      <h1 class="header-title">🗺️ Mapa da Rota</h1>  <link rel="preconnect" href="https://fonts.googleapis.com">  <link rel="preconnect" href="https://fonts.googleapis.com">
+      <h1 class="header-title">🗺️ Mapa da Rota</h1>  <link rel="preconnect" href="https://fonts.googleapis.com">
 
       <div id="counter">Carregando...</div>
 
-    </div>  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    </div>  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>  <meta name="apple-mobile-web-app-capable" content="yes" />  <meta name="apple-mobile-web-app-capable" content="yes" />
 
   </header>
 
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <div id="layout">
 
-    <!-- Mapa -->  <link rel="stylesheet" href="/static/css/style.css?v=7" />  <link rel="stylesheet" href="/static/css/style.css?v=6" />
+    <!-- Mapa Google Maps Style -->  <link rel="stylesheet" href="/static/css/style.css?v=8" />  <meta name="theme-color" content="#ffffff" />  <meta name="theme-color" content="#0f172a" />
 
     <div id="map-container">
 
-      <div id="map"></div></head></head>
+      <div id="map"></div></head>
 
       
 
-      <!-- Botão toggle mobile-friendly --><body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}"><body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}">
+      <!-- Botão toggle --><body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}">  <title>🗺️ Mapa da Rota</title>  <title>🗺️ Mapa da Rota</title>
 
       <button id="toggle-sidebar" class="toggle-btn" aria-label="Mostrar/Ocultar Lista">
+
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">  <!-- Header minimalista -->
+
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+
+          <line x1="3" y1="6" x2="21" y2="6"></line>  <header id="header">  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+
+        </svg>    <div class="header-content">
+
+      </button>
+
+    </div>      <h1 class="header-title">🗺️ Mapa da Rota</h1>  <link rel="preconnect" href="https://fonts.googleapis.com">  <link rel="preconnect" href="https://fonts.googleapis.com">
+
+
+
+    <!-- Sidebar com lista de pacotes -->      <div id="counter">Carregando...</div>
+
+    <aside id="sidebar">
+
+      <!-- Busca -->    </div>  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+      <div id="search-bar">
+
+        <input   </header>
+
+          type="search" 
+
+          id="search-input"   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+          placeholder="Buscar endereço ou código..." 
+
+          autocomplete="off"  <div id="layout">
+
+        />
+
+        <button id="clear-search" class="clear-btn" style="display: none;" aria-label="Limpar busca">×</button>    <!-- Mapa -->  <link rel="stylesheet" href="/static/css/style.css?v=7" />  <link rel="stylesheet" href="/static/css/style.css?v=6" />
+
+      </div>
+
+          <div id="map-container">
+
+      <!-- Lista de pacotes -->
+
+      <ul id="package-list"></ul>      <div id="map"></div></head></head>
+
+    </aside>
+
+  </div>      
+
+
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>      <!-- Botão toggle mobile-friendly --><body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}"><body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}">
+
+  <script src="/static/js/map.js?v=9"></script>
+
+</body>      <button id="toggle-sidebar" class="toggle-btn" aria-label="Mostrar/Ocultar Lista">
+
+</html>
 
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">  <!-- Header minimalista -->  <!-- Header Glassmorphism -->
 

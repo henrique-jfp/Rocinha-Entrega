@@ -10,7 +10,7 @@
     
     console.log('📍 Variáveis carregadas:', { routeId, driverId, botUsername, baseUrl });
 
-    // Initialize map - estilo claro e funcional
+    // Initialize map - estilo Google Maps (colorido e claro)
     const map = L.map('map', {
       center: [-22.9, -43.2],
       zoom: 13,
@@ -20,14 +20,14 @@
     
     console.log('✅ Mapa Leaflet inicializado');
     
-    // OpenStreetMap padrão - claro, legível, com todas as ruas visíveis
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors',
-      subdomains: 'abc'
+    // Mapa estilo Google Maps - cores vibrantes e saturadas
+    L.tileLayer('https://mt1.google.com/vt/lyrs=r&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      attribution: '© Google Maps',
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
     }).addTo(map);
     
-    // Alternativa: CartoDB Voyager (ainda mais limpo) - descomente para usar
+    // Alternativa: OpenStreetMap padrão - descomente para usar
     // L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     //   maxZoom: 19,
     //   attribution: '© CARTO © OpenStreetMap',
@@ -57,6 +57,97 @@
   }
 
   // Normaliza o endereço em uma chave: "rua + número" (ignora complemento)
+  // ============================================
+  // 🎨 SISTEMA DE CORES POR ÁREA GEOGRÁFICA
+  // ============================================
+  
+  // Define cores vibrantes para diferentes áreas
+  const AREA_COLORS = [
+    { primary: '#9333ea', shadow: 'rgba(147, 51, 234, 0.4)', name: 'Roxo' },      // Área 1
+    { primary: '#ec4899', shadow: 'rgba(236, 72, 153, 0.4)', name: 'Rosa' },      // Área 2
+    { primary: '#f59e0b', shadow: 'rgba(245, 158, 11, 0.4)', name: 'Laranja' },   // Área 3
+    { primary: '#10b981', shadow: 'rgba(16, 185, 129, 0.4)', name: 'Verde' },     // Área 4
+    { primary: '#3b82f6', shadow: 'rgba(59, 130, 246, 0.4)', name: 'Azul' },      // Área 5
+    { primary: '#ef4444', shadow: 'rgba(239, 68, 68, 0.4)', name: 'Vermelho' },   // Área 6
+    { primary: '#8b5cf6', shadow: 'rgba(139, 92, 246, 0.4)', name: 'Violeta' },   // Área 7
+    { primary: '#06b6d4', shadow: 'rgba(6, 182, 212, 0.4)', name: 'Ciano' },      // Área 8
+  ];
+
+  // Divide pacotes em áreas geográficas usando K-means simplificado
+  function divideIntoAreas(packages) {
+    if (packages.length === 0) return [];
+    
+    // Filtra pacotes com coordenadas válidas
+    const validPackages = packages.filter(p => p.latitude && p.longitude);
+    if (validPackages.length === 0) return [];
+    
+    // Determina número de áreas (máximo 8, mínimo 2)
+    const numAreas = Math.min(8, Math.max(2, Math.ceil(validPackages.length / 10)));
+    
+    // Inicializa centroides aleatórios
+    const centroids = [];
+    const step = Math.floor(validPackages.length / numAreas);
+    for (let i = 0; i < numAreas; i++) {
+      const pkg = validPackages[i * step] || validPackages[0];
+      centroids.push({ lat: pkg.latitude, lng: pkg.longitude });
+    }
+    
+    // Itera para ajustar centroides (K-means simplificado - 5 iterações)
+    for (let iter = 0; iter < 5; iter++) {
+      const clusters = Array.from({ length: numAreas }, () => []);
+      
+      // Atribui cada pacote ao centroide mais próximo
+      validPackages.forEach(pkg => {
+        let minDist = Infinity;
+        let bestCluster = 0;
+        
+        centroids.forEach((centroid, idx) => {
+          const dist = Math.sqrt(
+            Math.pow(pkg.latitude - centroid.lat, 2) + 
+            Math.pow(pkg.longitude - centroid.lng, 2)
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            bestCluster = idx;
+          }
+        });
+        
+        clusters[bestCluster].push(pkg);
+      });
+      
+      // Recalcula centroides
+      clusters.forEach((cluster, idx) => {
+        if (cluster.length > 0) {
+          const avgLat = cluster.reduce((sum, p) => sum + p.latitude, 0) / cluster.length;
+          const avgLng = cluster.reduce((sum, p) => sum + p.longitude, 0) / cluster.length;
+          centroids[idx] = { lat: avgLat, lng: avgLng };
+        }
+      });
+    }
+    
+    // Atribui cor de área para cada pacote
+    validPackages.forEach(pkg => {
+      let minDist = Infinity;
+      let areaIndex = 0;
+      
+      centroids.forEach((centroid, idx) => {
+        const dist = Math.sqrt(
+          Math.pow(pkg.latitude - centroid.lat, 2) + 
+          Math.pow(pkg.longitude - centroid.lng, 2)
+        );
+        if (dist < minDist) {
+          minDist = dist;
+          areaIndex = idx;
+        }
+      });
+      
+      pkg.areaColor = AREA_COLORS[areaIndex];
+      pkg.areaIndex = areaIndex + 1;
+    });
+    
+    return validPackages;
+  }
+
   function normalizeAddressKey(address) {
     if (!address) return null;
     let a = (address + '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
@@ -99,94 +190,129 @@
     return clusters;
   }
 
-  // Pins minimalistas e funcionais
-  function createNumberedIcon(number, status, isCluster = false){
-    // Cores sólidas e claras
-    let bgColor = '#2563eb'; // pending (azul)
-    let borderColor = '#1e40af';
+  // Pins estilo SPX Motorista - Gota/Lágrima com cores por área
+  function createNumberedIcon(number, status, isCluster = false, areaColor = null){
+    // Se não tiver cor de área, usa cor por status
+    let pinColor = areaColor ? areaColor.primary : '#9333ea';
+    let shadowColor = areaColor ? areaColor.shadow : 'rgba(147, 51, 234, 0.4)';
     
+    // Sobrescreve com cor de status se entregue/falhou
     if(status === 'delivered') {
-      bgColor = '#16a34a'; // verde
-      borderColor = '#15803d';
+      pinColor = '#10b981';
+      shadowColor = 'rgba(16, 185, 129, 0.4)';
     }
     if(status === 'failed') {
-      bgColor = '#dc2626'; // vermelho
-      borderColor = '#b91c1c';
+      pinColor = '#ef4444';
+      shadowColor = 'rgba(239, 68, 68, 0.4)';
     }
     
     // Cluster - múltiplos pacotes
     if (isCluster) {
       const html = `
-      <div style="position: relative;">
+      <div style="position: relative; width: 40px; height: 52px;">
+        <!-- Pin em formato de gota/lágrima estilo SPX -->
         <div style="
-          width: 44px;
-          height: 44px;
-          border-radius: 50%;
-          background: ${bgColor};
-          color: #fff;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 700;
-          font-size: 16px;
-          font-family: 'Inter', sans-serif;
+          width: 40px;
+          height: 40px;
+          background: ${pinColor};
+          border-radius: 50% 50% 50% 0;
+          transform: rotate(-45deg);
+          position: absolute;
+          top: 0;
+          left: 0;
+          box-shadow: 0 3px 10px ${shadowColor};
           border: 3px solid #fff;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        ">
-          ${number}
-        </div>
+        "></div>
+        
+        <!-- Número dentro do pin -->
         <div style="
           position: absolute;
-          top: -4px;
-          right: -4px;
-          background: #eab308;
-          color: #fff;
-          min-width: 20px;
-          height: 20px;
-          border-radius: 10px;
+          top: 8px;
+          left: 8px;
+          width: 24px;
+          height: 24px;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 11px;
-          font-weight: 700;
-          padding: 0 6px;
-          border: 2px solid #fff;
+          color: #fff;
+          font-weight: 800;
+          font-size: 14px;
+          font-family: 'Inter', sans-serif;
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+          z-index: 1;
+        ">${number}</div>
+        
+        <!-- Badge de cluster -->
+        <div style="
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          background: #fff;
+          color: ${pinColor};
+          min-width: 18px;
+          height: 18px;
+          border-radius: 9px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 10px;
+          font-weight: 800;
+          padding: 0 4px;
+          border: 2px solid ${pinColor};
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+          z-index: 2;
         ">+</div>
       </div>`;
       
       return L.divIcon({
         html: html,
         className: '',
-        iconSize: [44, 44],
-        iconAnchor: [22, 44]
+        iconSize: [40, 52],
+        iconAnchor: [20, 50]
       });
     }
     
-    // Pin individual - círculo simples
+    // Pin individual - gota/lágrima estilo SPX
     const html = `
-    <div style="
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: ${bgColor};
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 14px;
-      font-family: 'Inter', sans-serif;
-      border: 3px solid #fff;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-      cursor: pointer;
-    ">${number}</div>`;
+    <div style="position: relative; width: 36px; height: 48px;">
+      <!-- Pin em formato de gota/lágrima -->
+      <div style="
+        width: 36px;
+        height: 36px;
+        background: ${pinColor};
+        border-radius: 50% 50% 50% 0;
+        transform: rotate(-45deg);
+        position: absolute;
+        top: 0;
+        left: 0;
+        box-shadow: 0 3px 10px ${shadowColor};
+        border: 3px solid #fff;
+      "></div>
+      
+      <!-- Número dentro -->
+      <div style="
+        position: absolute;
+        top: 6px;
+        left: 6px;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-weight: 800;
+        font-size: 13px;
+        font-family: 'Inter', sans-serif;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        z-index: 1;
+      ">${number}</div>
+    </div>`;
     
     return L.divIcon({
       html: html,
       className: '',
-      iconSize: [36, 36],
-      iconAnchor: [18, 36]
+      iconSize: [36, 48],
+      iconAnchor: [18, 46]
     });
   }
 
@@ -344,7 +470,7 @@
   // Adiciona marcador individual
   function addPackageMarker(pkg, index){
     if(!(pkg.latitude && pkg.longitude)) return null;
-  const icon = createNumberedIcon(index + 1, pkg.status, false);
+    const icon = createNumberedIcon(index + 1, pkg.status, false, pkg.areaColor);
     const marker = L.marker([pkg.latitude, pkg.longitude], { icon }).addTo(markersLayer);
     marker.bindPopup(createPopupHtml(pkg));
     marker.pkg = pkg;
@@ -362,7 +488,10 @@
     if(statuses.every(s => s === 'delivered')) dominantStatus = 'delivered';
     else if(statuses.every(s => s === 'failed')) dominantStatus = 'failed';
     
-  const icon = createNumberedIcon(clusterIndex + 1, dominantStatus, true);
+    // Usa cor do primeiro pacote do cluster
+    const areaColor = packages[0].areaColor || null;
+    
+    const icon = createNumberedIcon(clusterIndex + 1, dominantStatus, true, areaColor);
     const marker = L.marker([cluster.lat, cluster.lng], { icon }).addTo(markersLayer);
     marker.bindPopup(createClusterPopupHtml(packages), { maxWidth: 340 });
     marker.cluster = cluster;
@@ -379,9 +508,31 @@
     const li = document.createElement('li');
     li.className = `list-item ${pkg.status}`;
 
+    // Indicador de cor de área
+    if (pkg.areaColor && pkg.status === 'pending') {
+      const areaIndicator = document.createElement('div');
+      areaIndicator.className = 'area-indicator';
+      areaIndicator.style.cssText = `
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: ${pkg.areaColor.primary};
+        border-radius: 0 4px 4px 0;
+      `;
+      li.appendChild(areaIndicator);
+      li.style.position = 'relative';
+    }
+
     const pinNum = document.createElement('div');
     pinNum.className = 'pin-number';
-  pinNum.textContent = index + 1;
+    pinNum.textContent = index + 1;
+    
+    // Aplica cor de área ao número se pendente
+    if (pkg.areaColor && pkg.status === 'pending') {
+      pinNum.style.background = pkg.areaColor.primary;
+    }
 
     const info = document.createElement('div');
     info.className = 'pkg-info';
@@ -603,10 +754,14 @@
       let hasChanges = false;
       let changedPackages = [];
 
+      // 🎨 DIVIDE PACOTES EM ÁREAS GEOGRÁFICAS COM CORES
+      divideIntoAreas(data);
+      console.log('🎨 Áreas coloridas atribuídas aos pacotes');
+
       // Agrupa pacotes próximos
       const clusters = clusterPackages(data);
       console.log('🗂️ Clusters criados:', clusters.length);
-  let displayIndex = 0; // número da parada (cluster)
+      let displayIndex = 0; // número da parada (cluster)
 
       clusters.forEach((cluster) => {
         if(cluster.packages.length === 1){
