@@ -88,10 +88,10 @@ SEND_SELECT_ROUTE, SEND_SELECT_DRIVER = range(20, 22)
 CONFIG_CHANNEL_SELECT_DRIVER, CONFIG_CHANNEL_ENTER_ID = range(23, 25)
 CONFIG_HOME_SELECT_DRIVER, CONFIG_HOME_LOCATION = range(26, 28)  # Estados para configurar casa
 
-# Estados financeiros (APENAS MANAGERS)
-FIN_KM, FIN_FUEL_YN, FIN_FUEL_TYPE, FIN_FUEL_LITERS, FIN_FUEL_AMOUNT = range(30, 35)
-FIN_INCOME, FIN_SALARY_YN, FIN_SALARY_NAME, FIN_SALARY_AMOUNT, FIN_SALARY_MORE = range(35, 40)
-FIN_EXPENSE_CATEGORY, FIN_EXPENSE_AMOUNT, FIN_EXPENSE_MORE, FIN_EXPENSES, FIN_NOTES = range(40, 45)
+# ❌ REMOVIDO: Estados financeiros obsoletos (/registrardia foi substituído por automação)
+# FIN_KM, FIN_FUEL_YN, FIN_FUEL_TYPE, FIN_FUEL_LITERS, FIN_FUEL_AMOUNT = range(30, 35)
+# FIN_INCOME, FIN_SALARY_YN, FIN_SALARY_NAME, FIN_SALARY_AMOUNT, FIN_SALARY_MORE = range(35, 40)
+# FIN_EXPENSE_CATEGORY, FIN_EXPENSE_AMOUNT, FIN_EXPENSE_MORE, FIN_EXPENSES, FIN_NOTES = range(40, 45)
 
 # Estados para finalização de rota
 FINALIZE_KM = 60
@@ -703,14 +703,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "💰 *FINANCEIRO & RELATÓRIOS*\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 
-                "📊 */registrardia*\n"
-                "   └ Registra dados do dia\n"
-                "   └ KM rodados e combustível\n"
-                "   └ Receitas e despesas categorizada\n"
-                "   └ Salários pagos\n"
-                "   └ ✨ NOVO: Vincula a uma rota\n\n"
-                
-                "📋 */meus_registros*\n"
+                " */meus_registros*\n"
                 "   └ Visualiza todos os registros\n"
                 "   └ ✨ NOVO: Ver/editar/deletar dias\n"
                 "   └ Balance de lucro por dia\n"
@@ -772,8 +765,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "   • /chat_ia: Converse com seus dados!\n"
                 "   • /configurar_canal_análise: Organize relatórios\n"
                 "   • /meus_registros: Edite/delete dias\n"
-                "   • /registrardia agora vincula a ROTA\n"
-                "   • /relatorio com análise POR ROTA\n\n"
+                "   • /relatorio com análise POR ROTA\n"
+                "   • Finanças automáticas na finalização\n\n"
                 
                 "1️⃣ *Nomeie rotas* (ex: Zona Sul, Centro)\n"
                 "   → Facilita identificação\n\n"
@@ -793,8 +786,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "6️⃣ *Use /chat_ia* para explorar dados\n"
                 "   → Respostas profundas com contexto\n\n"
                 
-                "7️⃣ *Registre com rota em /registrardia*\n"
-                "   → IA calcula margem por rota\n\n"
+                "7️⃣ *Finalize rotas* para registrar finanças\n"
+                "   → Dados automáticos com precisão\n\n"
                 
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🚀 *WORKFLOW RECOMENDADO*\n"
@@ -808,7 +801,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "↓\n"
                 "✅ *4. Receber* notificações automáticas\n"
                 "↓\n"
-                "📊 *5. Registrar* finanças com /registrardia ← VINCULA ROTA\n"
+                "🏁 *5. Finalizar* rota (registra finanças)\n"
                 "↓\n"
                 "💬 *6. Explorar* com /chat_ia (opcional)\n"
                 "↓\n"
@@ -4319,616 +4312,13 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== FINANCIAL SYSTEM (MANAGERS ONLY) =====
 
-async def fin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inicia o fluxo de registro financeiro do dia (APENAS MANAGERS)"""
-    user = update.effective_user
-    db = SessionLocal()
-    try:
-        db_user = db.query(User).filter(User.telegram_user_id == user.id).first()
-        if not db_user or db_user.role != "manager":
-            await update.message.reply_text("⛔ Apenas managers podem registrar dados financeiros.")
-            return ConversationHandler.END
-        
-        context.user_data['fin_salaries'] = []
-        today = datetime.now().strftime("%d/%m/%Y")
-        await update.message.reply_text(
-            f"📊 *Registro Financeiro - {today}*\n\n"
-            f"Vamos registrar os dados do dia!\n\n"
-            f"*1/8* - Quantos KM foram rodados hoje?\n"
-            f"_(Digite o total de KM ou /cancel para cancelar)_",
-            parse_mode='Markdown'
-        )
-        return FIN_KM
-    finally:
-        db.close()
-
-
-async def fin_km(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe KM rodados"""
-    try:
-        km = float(update.message.text.replace(',', '.'))
-        if km < 0:
-            raise ValueError
-        context.user_data['fin_km'] = km
-        
-        keyboard = [['Sim', 'Não']]
-        await update.message.reply_text(
-            f"✅ {km} KM registrados.\n\n"
-            f"*2/8* - Houve abastecimento hoje?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-            parse_mode='Markdown'
-        )
-        return FIN_FUEL_YN
-    except ValueError:
-        await update.message.reply_text("❌ Valor inválido. Digite apenas números (ex: 150 ou 150.5):")
-        return FIN_KM
-
-
-async def fin_fuel_yn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Pergunta se houve abastecimento"""
-    resp = update.message.text.strip().lower()
-    if resp in ['sim', 's', 'yes']:
-        keyboard = [['Etanol', 'GNV']]
-        await update.message.reply_text(
-            "*3/8* - Qual tipo de combustível?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-            parse_mode='Markdown'
-        )
-        return FIN_FUEL_TYPE
-    else:
-        context.user_data['fin_fuel'] = None
-        await update.message.reply_text(
-            "✅ Sem abastecimento registrado.\n\n"
-            "*4/8* - Qual foi o ganho total com rotas hoje? (R$)\n"
-            "_(Digite o valor ou 0 se não houver)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode='Markdown'
-        )
-        return FIN_INCOME
-
-
-async def fin_fuel_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe tipo de combustível"""
-    fuel_type = update.message.text.strip().upper()
-    if fuel_type not in ['ETANOL', 'GNV']:
-        await update.message.reply_text("❌ Escolha Etanol ou GNV:")
-        return FIN_FUEL_TYPE
-    
-    context.user_data['fin_fuel_type'] = fuel_type
-    await update.message.reply_text(
-        f"*3.1/8* - Quantos litros/m³ de {fuel_type}?",
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode='Markdown'
-    )
-    return FIN_FUEL_LITERS
-
-
-async def fin_fuel_liters(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe litros de combustível"""
-    try:
-        liters = float(update.message.text.replace(',', '.'))
-        if liters <= 0:
-            raise ValueError
-        context.user_data['fin_fuel_liters'] = liters
-        
-        fuel_type = context.user_data['fin_fuel_type']
-        await update.message.reply_text(
-            f"*3.2/8* - Qual foi o valor total pago pelos {liters} {'litros' if fuel_type == 'ETANOL' else 'm³'} de {fuel_type}? (R$)",
-            parse_mode='Markdown'
-        )
-        return FIN_FUEL_AMOUNT
-    except ValueError:
-        await update.message.reply_text("❌ Valor inválido. Digite apenas números:")
-        return FIN_FUEL_LITERS
-
-
-async def fin_fuel_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe valor pago no combustível"""
-    try:
-        amount = float(update.message.text.replace(',', '.').replace('R$', '').strip())
-        if amount <= 0:
-            raise ValueError
-        
-        fuel_type = context.user_data['fin_fuel_type']
-        liters = context.user_data['fin_fuel_liters']
-        
-        context.user_data['fin_fuel'] = {
-            'type': fuel_type,
-            'liters': liters,
-            'amount': amount
-        }
-        
-        await update.message.reply_text(
-            f"✅ Abastecimento registrado:\n"
-            f"• {fuel_type}: {liters} {'L' if fuel_type == 'ETANOL' else 'm³'} por R$ {amount:.2f}\n\n"
-            f"*4/8* - Qual foi o ganho total com rotas hoje? (R$)\n"
-            "_(Digite o valor ou 0 se não houver)_",
-            parse_mode='Markdown'
-        )
-        return FIN_INCOME
-    except ValueError:
-        await update.message.reply_text("❌ Valor inválido. Digite apenas números (ex: 150.00):")
-        return FIN_FUEL_AMOUNT
-
-
-async def fin_income(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe ganho total do dia"""
-    try:
-        income = float(update.message.text.replace(',', '.').replace('R$', '').strip())
-        if income < 0:
-            raise ValueError
-        context.user_data['fin_income'] = income
-        
-        keyboard = [['Sim', 'Não']]
-        await update.message.reply_text(
-            f"✅ Ganho registrado: R$ {income:.2f}\n\n"
-            f"*5/8* - Houve pagamento de salários hoje?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-            parse_mode='Markdown'
-        )
-        return FIN_SALARY_YN
-    except ValueError:
-        await update.message.reply_text("❌ Valor inválido. Digite apenas números (ex: 500.00 ou 0):")
-        return FIN_INCOME
-
-
-async def fin_salary_yn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Pergunta se houve pagamento de salários e mostra lista de motoristas"""
-    resp = update.message.text.strip().lower()
-    if resp in ['sim', 's', 'yes']:
-        # Busca motoristas cadastrados
-        db = SessionLocal()
-        try:
-            drivers = db.query(User).filter(User.role == "driver").all()
-            if not drivers:
-                await update.message.reply_text(
-                    "⚠️ Nenhum motorista cadastrado.\n\n"
-                    "Use /cadastrardriver para adicionar motoristas.\n\n"
-                    "*6/8* - Outras despesas? (manutenção, pedágio, etc)\n"
-                    "_(Digite o valor total ou 0)_",
-                    reply_markup=ReplyKeyboardRemove(),
-                    parse_mode='Markdown'
-                )
-                return FIN_EXPENSES
-            
-            # Cria keyboard com motoristas
-            keyboard = []
-            for driver in drivers:
-                driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
-                keyboard.append([driver_name])
-            
-            # Adiciona botão "Nenhum"
-            keyboard.append(["❌ Nenhum salário"])
-            
-            context.user_data['fin_drivers_list'] = {
-                driver.full_name or f"ID {driver.telegram_user_id}": driver.id 
-                for driver in drivers
-            }
-            
-            await update.message.reply_text(
-                "*5.1/8* - Qual motorista recebeu salário?\n\n"
-                "_(Selecione da lista abaixo)_",
-                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-                parse_mode='Markdown'
-            )
-            return FIN_SALARY_NAME
-        finally:
-            db.close()
-    else:
-        await update.message.reply_text(
-            "✅ Sem salários registrados.\n\n"
-            "*6/8* - Outras despesas? (manutenção, pedágio, etc)\n"
-            "_(Digite o valor total ou 0)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode='Markdown'
-        )
-        return FIN_EXPENSES
-
-
-async def fin_salary_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe nome do motorista (seleção de lista)"""
-    selected_name = update.message.text.strip()
-    
-    # Se clicou em "Nenhum salário"
-    if selected_name == "❌ Nenhum salário":
-        await update.message.reply_text(
-            "✅ Sem salários registrados.\n\n"
-            "*6/8* - Outras despesas? (manutenção, pedágio, etc)\n"
-            "_(Digite o valor total ou 0)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode='Markdown'
-        )
-        return FIN_EXPENSES
-    
-    # Valida se o motorista existe na lista
-    drivers_list = context.user_data.get('fin_drivers_list', {})
-    if selected_name not in drivers_list:
-        # Se digitou nome diferente, trata como entrada manual
-        context.user_data['fin_temp_salary_name'] = selected_name
-        await update.message.reply_text(
-            f"*5.2/8* - Valor pago a {selected_name}? (R$)",
-            parse_mode='Markdown'
-        )
-        return FIN_SALARY_AMOUNT
-    
-    context.user_data['fin_temp_salary_name'] = selected_name
-    context.user_data['fin_temp_salary_driver_id'] = drivers_list[selected_name]
-    
-    await update.message.reply_text(
-        f"*5.2/8* - Valor pago a {selected_name}? (R$)",
-        parse_mode='Markdown'
-    )
-    return FIN_SALARY_AMOUNT
-
-
-async def fin_salary_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe valor do salário"""
-    try:
-        amount = float(update.message.text.replace(',', '.').replace('R$', '').strip())
-        if amount <= 0:
-            raise ValueError
-        
-        name = context.user_data['fin_temp_salary_name']
-        context.user_data['fin_salaries'].append({'name': name, 'amount': amount})
-        
-        keyboard = [['Sim', 'Não']]
-        await update.message.reply_text(
-            f"✅ Salário registrado: {name} - R$ {amount:.2f}\n\n"
-            f"*5.3/8* - Registrar mais algum salário?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-            parse_mode='Markdown'
-        )
-        return FIN_SALARY_MORE
-    except ValueError:
-        await update.message.reply_text("❌ Valor inválido. Digite apenas números (ex: 1500.00):")
-        return FIN_SALARY_AMOUNT
-
-
-async def fin_salary_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Pergunta se há mais salários"""
-    resp = update.message.text.strip().lower()
-    if resp in ['sim', 's', 'yes']:
-        # Busca motoristas cadastrados novamente
-        db = SessionLocal()
-        try:
-            drivers = db.query(User).filter(User.role == "driver").all()
-            
-            # Cria keyboard com motoristas que ainda não foram pagos
-            keyboard = []
-            already_paid = {sal['name'] for sal in context.user_data.get('fin_salaries', [])}
-            
-            for driver in drivers:
-                driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
-                if driver_name not in already_paid:
-                    keyboard.append([driver_name])
-            
-            # Adiciona botão "Nenhum outro"
-            keyboard.append(["❌ Finalizar Salários"])
-            
-            if len(keyboard) == 1:  # Apenas o botão "Finalizar"
-                await update.message.reply_text(
-                    "✅ Todos os motoristas já foram registrados!\n\n"
-                    "*6/8* - Outras despesas? (manutenção, pedágio, etc)\n"
-                    "_(Digite o valor total ou 0)_",
-                    reply_markup=ReplyKeyboardRemove(),
-                    parse_mode='Markdown'
-                )
-                return FIN_EXPENSES
-            
-            context.user_data['fin_drivers_list'] = {
-                driver.full_name or f"ID {driver.telegram_user_id}": driver.id 
-                for driver in drivers
-            }
-            
-            await update.message.reply_text(
-                "*5.1/8* - Qual motorista recebeu salário?\n\n"
-                "_(Selecione da lista abaixo)_",
-                reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-                parse_mode='Markdown'
-            )
-            return FIN_SALARY_NAME
-        finally:
-            db.close()
-    else:
-        # Mostra resumo de salários registrados
-        salaries = context.user_data.get('fin_salaries', [])
-        if salaries:
-            salary_summary = "\n".join([f"• {sal['name']}: R$ {sal['amount']:.2f}" for sal in salaries])
-            salary_text = f"✅ Salários registrados:\n{salary_summary}\n\n"
-        else:
-            salary_text = "✅ Sem salários adicionais.\n\n"
-        
-        await update.message.reply_text(
-            f"{salary_text}"
-            "*6/8* - Outras despesas? (manutenção, pedágio, etc)\n"
-            "_(Digite o valor total ou 0)_",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode='Markdown'
-        )
-        return FIN_EXPENSES
-
-
-async def fin_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mostra opções de despesas com categorias"""
-    # Se já existem despesas, mostra keyboard de categorias
-    if not context.user_data.get('fin_expenses_asked'):
-        context.user_data['fin_expenses_asked'] = True
-        keyboard = [
-            ['🔧 Manutenção', '🛣️ Pedágio'],
-            ['⛽ Outro Combustível', '🚗 Outro'],
-            ['0️⃣ Sem Despesas']
-        ]
-        await update.message.reply_text(
-            "*6/8* - Quais despesas houve hoje?\n\n"
-            "_(Selecione uma categoria ou clique em 'Sem Despesas')_",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-            parse_mode='Markdown'
-        )
-        return FIN_EXPENSE_CATEGORY
-    
-    # Caso contrário, processa a seleção
-    category = update.message.text.strip()
-    
-    if category == '0️⃣ Sem Despesas':
-        context.user_data['fin_expenses'] = []
-        await update.message.reply_text(
-            f"✅ Sem despesas adicionais.\n\n"
-            f"*7/8* - Observações do dia? (opcional)\n"
-            f"_(Digite suas observações ou /pular para pular)_",
-            parse_mode='Markdown'
-        )
-        return FIN_NOTES
-    
-    # Mapeia categoria para tipo
-    category_map = {
-        '🔧 Manutenção': ('manutencao', 'Manutenção'),
-        '🛣️ Pedágio': ('pedagio', 'Pedágio'),
-        '⛽ Outro Combustível': ('combustivel_outro', 'Outro Combustível'),
-        '🚗 Outro': ('outro', 'Outra Despesa'),
-    }
-    
-    if category not in category_map:
-        await update.message.reply_text("❌ Categoria inválida. Escolha uma das opções:")
-        context.user_data['fin_expenses_asked'] = False
-        return FIN_EXPENSES
-    
-    context.user_data['fin_expense_category'] = category_map[category]
-    
-    await update.message.reply_text(
-        f"*6.{len(context.user_data.get('fin_expenses', [])) + 1}/8* - Qual foi o valor da despesa de {category_map[category][1]}? (R$)",
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode='Markdown'
-    )
-    return FIN_EXPENSE_AMOUNT
-
-
-async def fin_expense_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe categoria de despesa selecionada"""
-    category = update.message.text.strip()
-    
-    category_map = {
-        '🔧 Manutenção': ('manutencao', 'Manutenção'),
-        '🛣️ Pedágio': ('pedagio', 'Pedágio'),
-        '⛽ Outro Combustível': ('combustivel_outro', 'Outro Combustível'),
-        '🚗 Outro': ('outro', 'Outra Despesa'),
-    }
-    
-    if category == '0️⃣ Sem Despesas':
-        context.user_data['fin_expenses'] = []
-        await update.message.reply_text(
-            f"✅ Sem despesas adicionais.\n\n"
-            f"*7/8* - Observações do dia? (opcional)\n"
-            f"_(Digite suas observações ou /pular para pular)_",
-            parse_mode='Markdown'
-        )
-        return FIN_NOTES
-    
-    if category not in category_map:
-        await update.message.reply_text("❌ Categoria inválida. Escolha uma das opções:")
-        return FIN_EXPENSE_CATEGORY
-    
-    context.user_data['fin_expense_category'] = category_map[category]
-    
-    await update.message.reply_text(
-        f"*6.1/8* - Qual foi o valor da despesa de {category_map[category][1]}? (R$)",
-        parse_mode='Markdown'
-    )
-    return FIN_EXPENSE_AMOUNT
-
-
-async def fin_expense_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe valor da despesa"""
-    try:
-        amount = float(update.message.text.replace(',', '.').replace('R$', '').strip())
-        if amount <= 0:
-            raise ValueError
-        
-        category_type, category_name = context.user_data['fin_expense_category']
-        
-        if 'fin_expenses' not in context.user_data:
-            context.user_data['fin_expenses'] = []
-        
-        context.user_data['fin_expenses'].append({
-            'type': category_type,
-            'name': category_name,
-            'amount': amount
-        })
-        
-        keyboard = [['➕ Mais uma', '✅ Finalizar']]
-        await update.message.reply_text(
-            f"✅ Despesa registrada: {category_name} - R$ {amount:.2f}\n\n"
-            f"*6.2/8* - Deseja registrar mais alguma despesa?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-            parse_mode='Markdown'
-        )
-        return FIN_EXPENSE_MORE
-    except ValueError:
-        await update.message.reply_text("❌ Valor inválido. Digite apenas números (ex: 50.00):")
-        return FIN_EXPENSE_AMOUNT
-
-
-async def fin_expense_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Pergunta se há mais despesas"""
-    resp = update.message.text.strip().lower()
-    
-    if resp in ['sim', 's', 'yes', '➕ mais uma']:
-        keyboard = [
-            ['🔧 Manutenção', '🛣️ Pedágio'],
-            ['⛽ Outro Combustível', '🚗 Outro'],
-            ['✅ Finalizar']
-        ]
-        await update.message.reply_text(
-            "*6/8* - Qual a próxima despesa?\n\n"
-            "_(Selecione uma categoria)_",
-            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
-            parse_mode='Markdown'
-        )
-        return FIN_EXPENSE_CATEGORY
-    else:
-        # Mostra resumo de despesas
-        expenses = context.user_data.get('fin_expenses', [])
-        if expenses:
-            expense_summary = "\n".join([f"• {exp['name']}: R$ {exp['amount']:.2f}" for exp in expenses])
-            expense_text = f"✅ Despesas registradas:\n{expense_summary}\n\n"
-        else:
-            expense_text = "✅ Sem despesas adicionais.\n\n"
-        
-        await update.message.reply_text(
-            f"{expense_text}"
-            f"*7/8* - Observações do dia? (opcional)\n"
-            f"_(Digite suas observações ou /pular para pular)_",
-            parse_mode='Markdown'
-        )
-        return FIN_NOTES
-
-
-async def fin_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe observações e finaliza"""
-    notes = update.message.text.strip()
-    if notes == '/pular':
-        notes = ''
-    
-    context.user_data['fin_notes'] = notes
-    
-    # Salvar tudo no banco
-    user = update.effective_user
-    db = SessionLocal()
-    try:
-        today = datetime.now().date()
-        
-        # 1. Salvar KM
-        km_total = context.user_data.get('fin_km', 0)
-        if km_total > 0:
-            mileage = Mileage(
-                date=today,
-                km_start=0,
-                km_end=km_total,
-                km_total=km_total,
-                notes=notes or None,
-                created_by=user.id
-            )
-            db.add(mileage)
-        
-        # 2. Salvar combustível
-        fuel_data = context.user_data.get('fin_fuel')
-        if fuel_data:
-            expense_fuel = Expense(
-                date=today,
-                type='combustivel',
-                description=f"{fuel_data['liters']} {'L' if fuel_data['type'] == 'ETANOL' else 'm³'} de {fuel_data['type']}",
-                amount=fuel_data['amount'],
-                fuel_type=fuel_data['type'],
-                fuel_liters=fuel_data['liters'],
-                created_by=user.id
-            )
-            db.add(expense_fuel)
-        
-        # 3. Salvar ganhos
-        income_amount = context.user_data.get('fin_income', 0)
-        if income_amount > 0:
-            income = Income(
-                date=today,
-                description=f"Ganho total do dia",
-                amount=income_amount,
-                created_by=user.id
-            )
-            db.add(income)
-        
-        # 4. Salvar salários
-        salaries = context.user_data.get('fin_salaries', [])
-        for sal in salaries:
-            expense_salary = Expense(
-                date=today,
-                type='salario',
-                description=f"Salário de {sal['name']}",
-                amount=sal['amount'],
-                employee_name=sal['name'],
-                created_by=user.id
-            )
-            db.add(expense_salary)
-        
-        # 5. Salvar outras despesas (agora com categorias)
-        expenses_list = context.user_data.get('fin_expenses', [])
-        for exp in expenses_list:
-            expense_other = Expense(
-                date=today,
-                type=exp['type'],
-                description=f"{exp['name']}",
-                amount=exp['amount'],
-                created_by=user.id
-            )
-            db.add(expense_other)
-        
-        db.commit()
-        
-        # Montar resumo
-        total_fuel_amount = fuel_data['amount'] if fuel_data else 0
-        total_salaries = sum(s['amount'] for s in salaries)
-        total_other_expenses = sum(e['amount'] for e in expenses_list)
-        total_expenses = total_fuel_amount + total_salaries + total_other_expenses
-        balance = income_amount - total_expenses
-        
-        summary = f"📊 *Registro Financeiro Concluído!*\n\n"
-        summary += f"📅 Data: {today.strftime('%d/%m/%Y')}\n\n"
-        summary += f"🚗 *KM Rodados:* {km_total} km\n\n"
-        
-        if fuel_data:
-            summary += f"⛽ *Combustível:*\n"
-            summary += f"  • {fuel_data['type']}: {fuel_data['liters']} {'L' if fuel_data['type'] == 'ETANOL' else 'm³'}\n"
-            summary += f"  • Valor: R$ {fuel_data['amount']:.2f}\n\n"
-        
-        summary += f"💰 *Ganhos:* R$ {income_amount:.2f}\n\n"
-        
-        summary += f"💸 *Despesas:*\n"
-        if fuel_data:
-            summary += f"  • Combustível: R$ {fuel_data['amount']:.2f}\n"
-        if salaries:
-            summary += f"  • Salários: R$ {total_salaries:.2f}\n"
-            for sal in salaries:
-                summary += f"    - {sal['name']}: R$ {sal['amount']:.2f}\n"
-        if expenses_list:
-            summary += f"  • Outras Despesas: R$ {total_other_expenses:.2f}\n"
-            for exp in expenses_list:
-                summary += f"    - {exp['name']}: R$ {exp['amount']:.2f}\n"
-        summary += f"  *Total:* R$ {total_expenses:.2f}\n\n"
-        
-        summary += f"📈 *Saldo:* R$ {balance:.2f}"
-        if balance < 0:
-            summary += " ⚠️ (Prejuízo)"
-        
-        if notes:
-            summary += f"\n\n📝 *Observações:* {notes}"
-        
-        await update.message.reply_text(summary, parse_mode='Markdown', reply_markup=ReplyKeyboardRemove())
-        
-    except Exception as e:
-        db.rollback()
-        await update.message.reply_text(f"❌ Erro ao salvar dados: {str(e)}")
-    finally:
-        db.close()
-        context.user_data.clear()
-    
-    return ConversationHandler.END
+# ❌ REMOVIDO: Funções do fluxo /registrardia (obsoleto após 100% automação)
+# Total: ~600 linhas comentadas
+# Funções removidas: fin_start, fin_km, fin_fuel_yn, fin_fuel_type, fin_fuel_liters,
+# fin_fuel_amount, fin_income, fin_salary_yn, fin_salary_name, fin_salary_amount,
+# fin_salary_more, fin_expenses, fin_expense_category, fin_expense_amount,
+# fin_expense_more, fin_notes
+# Motivo: 100% automação via finalização de rotas torna registro manual desnecessário
 
 
 # ==================== GERENCIAR REGISTROS FINANCEIROS ====================
@@ -4975,7 +4365,7 @@ async def cmd_meus_registros(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(
                 "📭 *Nenhum Registro Encontrado*\n\n"
                 "Você não tem registros financeiros neste mês.\n\n"
-                "Use /registrardia para criar o primeiro registro!",
+                "Finalize rotas para criar registros automáticos!",
                 parse_mode='Markdown'
             )
             return
@@ -5503,30 +4893,9 @@ def setup_bot_handlers(app: Application):
     app.add_handler(add_driver_conv)
     app.add_handler(CommandHandler("drivers", list_drivers))
 
-    financial_conv = ConversationHandler(
-        entry_points=[CommandHandler("registrardia", fin_start)],
-        states={
-            FIN_KM: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_km)],
-            FIN_FUEL_YN: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_fuel_yn)],
-            FIN_FUEL_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_fuel_type)],
-            FIN_FUEL_LITERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_fuel_liters)],
-            FIN_FUEL_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_fuel_amount)],
-            FIN_INCOME: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_income)],
-            FIN_SALARY_YN: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_salary_yn)],
-            FIN_SALARY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_salary_name)],
-            FIN_SALARY_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_salary_amount)],
-            FIN_SALARY_MORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_salary_more)],
-            FIN_EXPENSES: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_expenses)],
-            FIN_EXPENSE_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_expense_category)],
-            FIN_EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_expense_amount)],
-            FIN_EXPENSE_MORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_expense_more)],
-            FIN_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, fin_notes)],
-        },
-        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
-        name="financial_conv",
-        persistent=False,
-    )
-    app.add_handler(financial_conv)
+    # ❌ REMOVIDO: ConversationHandler de /registrardia (obsoleto - substituído por automação)
+    # financial_conv = ConversationHandler(...)
+    # app.add_handler(financial_conv)
 
     # Handler para mensagens genéricas (para processar ID do canal quando solicitado)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_channel_id_input))
