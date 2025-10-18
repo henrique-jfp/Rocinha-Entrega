@@ -1092,29 +1092,55 @@ Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
                 # Divide relatório em mensagens (limite Telegram: 4096 chars)
                 max_length = 4000
                 if len(ai_analysis) <= max_length:
-                    await processing_msg.edit_text(
-                        f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{ai_analysis}",
-                        parse_mode='Markdown'
-                    )
+                    msg_text = f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{ai_analysis}"
+                    await processing_msg.edit_text(msg_text, parse_mode='Markdown')
+                    
+                    # Se tem canal configurado, envia lá também
+                    if me.channel_id:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=me.channel_id,
+                                text=msg_text,
+                                parse_mode='Markdown'
+                            )
+                        except Exception as ch_err:
+                            print(f"Aviso: Não consegui enviar para o canal: {ch_err}")
                 else:
                     # Envia em partes
                     await processing_msg.delete()
                     parts = [ai_analysis[i:i+max_length] for i in range(0, len(ai_analysis), max_length)]
                     
-                    await update.message.reply_text(
-                        f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{parts[0]}",
-                        parse_mode='Markdown'
-                    )
+                    first_msg = f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{parts[0]}"
+                    msg1 = await update.message.reply_text(first_msg, parse_mode='Markdown')
                     
                     for part in parts[1:]:
                         await update.message.reply_text(part, parse_mode='Markdown')
+                    
+                    # Se tem canal, envia lá também
+                    if me.channel_id:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=me.channel_id,
+                                text=first_msg,
+                                parse_mode='Markdown'
+                            )
+                            for part in parts[1:]:
+                                await context.bot.send_message(
+                                    chat_id=me.channel_id,
+                                    text=part,
+                                    parse_mode='Markdown'
+                                )
+                        except Exception as ch_err:
+                            print(f"Aviso: Não consegui enviar para o canal: {ch_err}")
                 
                 # Mensagem final
+                canal_info = "📢 *Enviado para o canal também!*\n" if me.channel_id else ""
                 await update.message.reply_text(
-                    "✅ *Relatório salvo!*\n\n"
+                    f"✅ *Relatório salvo!*\n\n"
                     f"🤖 Gerado por IA Groq (Llama 3.1)\n"
-                    f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n\n"
-                    "_Use /relatorio novamente para atualizar._",
+                    f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n"
+                    f"{canal_info}"
+                    f"_Use /relatorio novamente para atualizar._",
                     parse_mode='Markdown'
                 )
                 ai_report_generated = True
@@ -1196,6 +1222,90 @@ async def cmd_meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_configurar_canal_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Configura canal dedicado para receber análises e relatórios"""
+    db = SessionLocal()
+    try:
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\n"
+                "Apenas gerentes podem configurar canais.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Pega o canal_id do usuário se já tem
+        if me.channel_id:
+            await update.message.reply_text(
+                f"📢 *Canal Configurado*\n\n"
+                f"ID atual: `{me.channel_id}`\n\n"
+                f"📝 *Para mudar*, responda com o novo ID do canal\n"
+                f"(Ex: `-1003024500289`)\n\n"
+                f"💡 Dica: Use /meu_id dentro do canal para pegar o ID",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                f"📢 *Nenhum Canal Configurado*\n\n"
+                f"📝 Responda com o ID do seu canal de análise\n"
+                f"(Ex: `-1003024500289`)\n\n"
+                f"💡 Dica: Use /meu_id dentro do canal para pegar o ID",
+                parse_mode='Markdown'
+            )
+        
+        # Armazena o estado na conversa
+        context.user_data['waiting_for_channel_id'] = True
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro: {str(e)}")
+    finally:
+        db.close()
+
+
+async def handle_channel_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processa o ID do canal quando o usuário responde ao /configurar_canal_análise"""
+    if not context.user_data.get('waiting_for_channel_id'):
+        return  # Não está esperando por um ID de canal
+    
+    db = SessionLocal()
+    try:
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            return
+        
+        channel_id = update.message.text.strip()
+        
+        # Valida se é um número negativo (formato de canal Telegram)
+        if not channel_id.startswith('-') or not channel_id[1:].isdigit():
+            await update.message.reply_text(
+                "❌ *Formato Inválido*\n\n"
+                "O ID do canal deve ser um número negativo\n"
+                "Ex: `-1003024500289`\n\n"
+                "Tente novamente ou /cancelar",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Salva o ID do canal no banco
+        me.channel_id = channel_id
+        db.add(me)
+        db.commit()
+        
+        # Limpa o estado
+        context.user_data.pop('waiting_for_channel_id', None)
+        
+        await update.message.reply_text(
+            f"✅ *Canal Configurado com Sucesso!*\n\n"
+            f"ID: `{channel_id}`\n\n"
+            f"🎉 Agora seus relatórios serão enviados neste canal quando você usar /relatorio",
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro: {str(e)}")
+    finally:
+        db.close()
 
 
 async def cmd_rotas(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4229,6 +4339,7 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(on_delete_view_route, pattern=r"^delete_view_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_back_to_routes, pattern=r"^back_to_routes$"))
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
+    app.add_handler(CommandHandler("configurar_canal_analise", cmd_configurar_canal_analise))
     app.add_handler(CommandHandler("meus_registros", cmd_meus_registros))
     app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record:"))
     app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record_by_date:"))
@@ -4360,6 +4471,9 @@ def setup_bot_handlers(app: Application):
         persistent=False,
     )
     app.add_handler(financial_conv)
+
+    # Handler para mensagens genéricas (para processar ID do canal quando solicitado)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_channel_id_input))
 
     async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
