@@ -2868,6 +2868,17 @@ async def recv_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text.lower() == "pular" or text.startswith("⏭️"):
         text = None
     context.user_data["notes"] = text
+    
+    # ✅ FASE 2.1: CONFIRMAÇÃO INSTANTÂNEA
+    # Confirma recebimento dos dados IMEDIATAMENTE (< 500ms)
+    await update.message.reply_text(
+        "✅ *Dados Recebidos!*\n\n"
+        "📦 Processando entrega...\n"
+        "⏳ _Isso pode levar alguns segundos_",
+        parse_mode='Markdown',
+        reply_markup=ReplyKeyboardRemove()
+    )
+    
     return await finalize_delivery(update, context)
 
 
@@ -2883,12 +2894,50 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
+    # ✅ FASE 2.2: UMA ÚNICA CONEXÃO AO BANCO
     db = SessionLocal()
     try:
+        # ✅ FASE 2.2: MOSTRA PREVIEW DOS DADOS ANTES DE SALVAR
         driver = get_user_by_tid(db, update.effective_user.id)
+        
+        # Extrai dados do context
+        receiver_name_val = context.user_data.get("receiver_name", "Não informado")
+        receiver_document_val = context.user_data.get("receiver_document", "Não informado")
+        notes_val = context.user_data.get("notes", "Nenhuma")
+        mass_list = context.user_data.get("mass_photos") or []
+        
+        # Preview com resumo
+        if pkg_ids:
+            packages = db.query(Package).filter(Package.id.in_(pkg_ids)).all()
+            num_packages = len(packages) if packages else 0
+            preview_text = (
+                f"📋 *Resumo da Entrega em Grupo*\n\n"
+                f"📦 Pacotes: {num_packages}\n"
+                f"👤 Recebedor: {receiver_name_val}\n"
+                f"📄 Documento: {receiver_document_val}\n"
+                f"📸 Fotos: {len(mass_list) if mass_list else '2 fotos'}\n"
+                f"💬 Observações: {notes_val}\n\n"
+                f"⏳ Salvando no banco de dados..."
+            )
+        else:
+            package = db.get(Package, int(pkg_id))
+            tracking = package.tracking_code if package and hasattr(package, 'tracking_code') else f"ID {pkg_id}"
+            preview_text = (
+                f"📋 *Resumo da Entrega*\n\n"
+                f"📦 Pacote: {tracking}\n"
+                f"👤 Recebedor: {receiver_name_val}\n"
+                f"📄 Documento: {receiver_document_val}\n"
+                f"💬 Observações: {notes_val}\n\n"
+                f"⏳ Salvando no banco de dados..."
+            )
+        
+        preview_msg = await update.message.reply_text(
+            preview_text,
+            parse_mode='Markdown'
+        )
+        
         # Persistimos ao menos a primeira foto de pacote (unitário ou em massa) + foto do local
         p1_for_db = context.user_data.get("photo1_file_id")
-        mass_list = context.user_data.get("mass_photos") or []
         if not p1_for_db and mass_list:
             p1_for_db = mass_list[0]
 
@@ -2897,15 +2946,12 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         delivered_codes: list[str] = []
         primary_addr: str | None = None
         primary_neighborhood: str | None = None
-        receiver_name_val = context.user_data.get("receiver_name")
-        receiver_document_val = context.user_data.get("receiver_document")
-        notes_val = context.user_data.get("notes")
 
         if pkg_ids:
             # Entrega em grupo
             packages = db.query(Package).filter(Package.id.in_(pkg_ids)).all()
             if not packages:
-                await update.message.reply_text(
+                await preview_msg.edit_text(
                     "❌ *Pacotes Não Encontrados*",
                     parse_mode='Markdown'
                 )
@@ -2935,7 +2981,7 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Entrega unitária
             package = db.get(Package, int(pkg_id))
             if not package:
-                await update.message.reply_text(
+                await preview_msg.edit_text(
                     "❌ *Pacote Não Encontrado*\n\n"
                     f"O pacote ID `{pkg_id}` não existe.",
                     parse_mode='Markdown'
@@ -2966,121 +3012,111 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 delivered_codes = []
             db.commit()
-
-    finally:
-        db.close()
-
-    # Notificar managers OU canal configurado do motorista
-    try:
-        db2 = SessionLocal()
-        # Recarrega driver e, se necessário, a rota
-        driver = get_user_by_tid(db2, update.effective_user.id)
-        # Captura route_id e nome da rota
+        
+        # ✅ FASE 2.2: CALCULA PROGRESSO NA MESMA CONEXÃO (não abre db_progress separado)
+        # Calcula progresso da rota na mesma transação
         route_name = None
+        total_packages = 0
+        delivered_packages = 0
+        remaining_packages = 0
+        
         if route_id is not None:
             try:
-                route_obj = db2.query(Route).filter(Route.id == route_id).first()
+                route_obj = db.query(Route).filter(Route.id == route_id).first()
                 route_name = route_obj.name if route_obj and route_obj.name else f"Rota {route_id}"
-            except Exception:
-                route_name = f"Rota {route_id}"
-    finally:
-        db2.close()
-    
-    if driver:
-        receiver_name = context.user_data.get('receiver_name') or '-'
-        receiver_doc = context.user_data.get('receiver_document') or '-'
-        notes = context.user_data.get('notes') or '-'
-        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
-        
-        # Calcula progresso da rota
-        db_progress = SessionLocal()
-        try:
-            if route_id is not None:
-                total_packages = db_progress.query(Package).filter(Package.route_id == route_id).count()
-                delivered_packages = db_progress.query(Package).filter(
+                
+                total_packages = db.query(Package).filter(Package.route_id == route_id).count()
+                delivered_packages = db.query(Package).filter(
                     Package.route_id == route_id,
                     Package.status == "delivered"
                 ).count()
-            else:
-                total_packages = 0
-                delivered_packages = 0
-            remaining_packages = max(0, total_packages - delivered_packages)
-            route_name = route_name or (f"Rota {route_id}" if route_id is not None else "Rota")
-        finally:
-            db_progress.close()
+                remaining_packages = max(0, total_packages - delivered_packages)
+            except Exception:
+                route_name = f"Rota {route_id}"
         
-        # Mensagem formatada para o canal (sem asteriscos, mais limpo)
-        # Monta resumo: suporta múltiplos pacotes
-        if pkg_ids:
-            codes = [c for c in delivered_codes if c]
-            codes_list = ", ".join(codes)  # Todos os códigos sem abreviação
-            summary = (
-                f"✅ Entregas Concluídas!\n\n"
-                f"Motorista: {driver_name}\n"
-                f"Pacotes: {len(delivered_ids)}\n"
-                f"Códigos: {codes_list}\n"
-                f"Endereço: {primary_addr or '-'}\n"
-                f"Bairro: {primary_neighborhood or '-'}\n"
-                f"Recebedor: {receiver_name}\n"
-                f"Documento: {receiver_doc}\n"
-                f"Observações: {notes}\n"
-                f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
-            )
-        else:
-            summary = (
-                f"✅ Entrega Concluída!\n\n"
-                f"Motorista: {driver_name}\n"
-                f"Pacote: {(delivered_codes[0] if delivered_codes else '-') }\n"
-                f"Endereço: {primary_addr or '-'}\n"
-                f"Bairro: {primary_neighborhood or '-'}\n"
-                f"Recebedor: {receiver_name}\n"
-                f"Documento: {receiver_doc}\n"
-                f"Observações: {notes}\n"
-                f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
-            )
-        
-        # Mensagem de progresso
-        progress_message = (
-            f"📊 Status da Rota: {route_name}\n\n"
-            f"✅ Entregues: {delivered_packages}\n"
-            f"⏳ Pendentes: {remaining_packages}\n"
-            f"📦 Total: {total_packages}\n\n"
-            f"Progresso: {(delivered_packages/total_packages*100 if total_packages > 0 else 0):.0f}%"
+        # ✅ FASE 2.2: PREPARA DADOS PARA NOTIFICAÇÃO (antes de fechar conexão)
+        receiver_name = receiver_name_val or '-'
+        receiver_doc = receiver_document_val or '-'
+        notes = notes_val or '-'
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}"
+        route_name = route_name or (f"Rota {route_id}" if route_id is not None else "Rota")
+
+    except Exception as e:
+        # ✅ FASE 2.3: FEEDBACK DE ERRO DETALHADO
+        await preview_msg.edit_text(
+            f"❌ *Erro ao Finalizar*\n\n"
+            f"Detalhes: {str(e)}\n\n"
+            f"💡 Use /entregar novamente",
+            parse_mode='Markdown'
         )
-        
-        # Verifica se motorista tem canal configurado
-        if driver.channel_id:
-            # Envia para o CANAL
-            try:
-                # Envia informações
-                await context.bot.send_message(
-                    chat_id=driver.channel_id,
-                    text=summary
-                )
-                
-                # Envia fotos como grupo/media
-                p1 = context.user_data.get("photo1_file_id")
-                p2 = context.user_data.get("photo2_file_id")
-                mass_list = context.user_data.get("mass_photos") or []
-                
-                # Prioriza enviar fotos em massa (se houver)
-                if mass_list:
-                    # Envia em grupos de até 10
-                    batch = []
-                    for idx, fid in enumerate(mass_list, start=1):
-                        cap = "Pacote"
-                        batch.append(InputMediaPhoto(fid, caption=cap if idx == 1 else None))
-                        if len(batch) == 10:
-                            try:
-                                await context.bot.send_media_group(chat_id=driver.channel_id, media=batch)
-                            except Exception:
-                                for item in batch:
-                                    try:
-                                        await context.bot.send_photo(chat_id=driver.channel_id, photo=item.media, caption=item.caption)
-                                    except Exception:
-                                        pass
-                            batch = []
-                    if batch:
+        logger.error(f"Erro em finalize_delivery: {str(e)}", exc_info=True)
+        return ConversationHandler.END
+    finally:
+        db.close()
+    
+    # ✅ FASE 2.3: NOTIFICAÇÃO COM DADOS CONSOLIDADOS
+    # Mensagem formatada para o canal (sem asteriscos, mais limpo)
+    # Monta resumo: suporta múltiplos pacotes
+    if pkg_ids:
+        codes = [c for c in delivered_codes if c]
+        codes_list = ", ".join(codes)  # Todos os códigos sem abreviação
+        summary = (
+            f"✅ Entregas Concluídas!\n\n"
+            f"Motorista: {driver_name}\n"
+            f"Pacotes: {len(delivered_ids)}\n"
+            f"Códigos: {codes_list}\n"
+            f"Endereço: {primary_addr or '-'}\n"
+            f"Bairro: {primary_neighborhood or '-'}\n"
+            f"Recebedor: {receiver_name}\n"
+            f"Documento: {receiver_doc}\n"
+            f"Observações: {notes}\n"
+            f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+        )
+    else:
+        summary = (
+            f"✅ Entrega Concluída!\n\n"
+            f"Motorista: {driver_name}\n"
+            f"Pacote: {(delivered_codes[0] if delivered_codes else '-') }\n"
+            f"Endereço: {primary_addr or '-'}\n"
+            f"Bairro: {primary_neighborhood or '-'}\n"
+            f"Recebedor: {receiver_name}\n"
+            f"Documento: {receiver_doc}\n"
+            f"Observações: {notes}\n"
+            f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+        )
+    
+    # Mensagem de progresso
+    progress_message = (
+        f"📊 Status da Rota: {route_name}\n\n"
+        f"✅ Entregues: {delivered_packages}\n"
+        f"⏳ Pendentes: {remaining_packages}\n"
+        f"📦 Total: {total_packages}\n\n"
+        f"Progresso: {(delivered_packages/total_packages*100 if total_packages > 0 else 0):.0f}%"
+    )
+    
+    # Verifica se motorista tem canal configurado
+    if driver.channel_id:
+        # Envia para o CANAL
+        try:
+            # Envia informações
+            await context.bot.send_message(
+                chat_id=driver.channel_id,
+                text=summary
+            )
+            
+            # Envia fotos como grupo/media
+            p1 = context.user_data.get("photo1_file_id")
+            p2 = context.user_data.get("photo2_file_id")
+            mass_list = context.user_data.get("mass_photos") or []
+            
+            # Prioriza enviar fotos em massa (se houver)
+            if mass_list:
+                # Envia em grupos de até 10
+                batch = []
+                for idx, fid in enumerate(mass_list, start=1):
+                    cap = "Pacote"
+                    batch.append(InputMediaPhoto(fid, caption=cap if idx == 1 else None))
+                    if len(batch) == 10:
                         try:
                             await context.bot.send_media_group(chat_id=driver.channel_id, media=batch)
                         except Exception:
@@ -3089,33 +3125,32 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                     await context.bot.send_photo(chat_id=driver.channel_id, photo=item.media, caption=item.caption)
                                 except Exception:
                                     pass
-                    # Envia foto do local (se houver)
-                    if p2:
-                        try:
-                            await context.bot.send_photo(chat_id=driver.channel_id, photo=p2, caption="Local/Porta")
-                        except Exception:
-                            pass
-                else:
-                    # Fluxo unitário normal
-                    if p1 and p2:
-                        media = [
-                            InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
-                            InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
-                        ]
-                        try:
-                            await context.bot.send_media_group(chat_id=driver.channel_id, media=media)
-                        except Exception:
-                            if p1:
-                                try:
-                                    await context.bot.send_photo(chat_id=driver.channel_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
-                                except Exception:
-                                    pass
-                            if p2:
-                                try:
-                                    await context.bot.send_photo(chat_id=driver.channel_id, photo=p2, caption="Foto 2 - Local/Porta")
-                                except Exception:
-                                    pass
-                    else:
+                        batch = []
+                if batch:
+                    try:
+                        await context.bot.send_media_group(chat_id=driver.channel_id, media=batch)
+                    except Exception:
+                        for item in batch:
+                            try:
+                                await context.bot.send_photo(chat_id=driver.channel_id, photo=item.media, caption=item.caption)
+                            except Exception:
+                                pass
+                # Envia foto do local (se houver)
+                if p2:
+                    try:
+                        await context.bot.send_photo(chat_id=driver.channel_id, photo=p2, caption="Local/Porta")
+                    except Exception:
+                        pass
+            else:
+                # Fluxo unitário normal
+                if p1 and p2:
+                    media = [
+                        InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
+                        InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
+                    ]
+                    try:
+                        await context.bot.send_media_group(chat_id=driver.channel_id, media=media)
+                    except Exception:
                         if p1:
                             try:
                                 await context.bot.send_photo(chat_id=driver.channel_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
@@ -3126,37 +3161,48 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 await context.bot.send_photo(chat_id=driver.channel_id, photo=p2, caption="Foto 2 - Local/Porta")
                             except Exception:
                                 pass
-                
-                # Envia progresso após as fotos
-                await context.bot.send_message(
-                    chat_id=driver.channel_id,
-                    text=progress_message
-                )
-                
-            except Exception as e:
-                # Se falhar, envia para os managers como fallback
-                await notify_managers(f"⚠️ Erro ao enviar para canal: {str(e)}\n\n{summary}", context)
-                
-                p1 = context.user_data.get("photo1_file_id")
-                p2 = context.user_data.get("photo2_file_id")
-                if p1 or p2:
-                    dbm = SessionLocal()
-                    try:
-                        managers = dbm.query(User).filter(User.role == "manager").all()
-                    finally:
-                        dbm.close()
-                    for m in managers:
-                        if p1:
-                            try:
-                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="Foto 1")
-                            except Exception:
-                                pass
-                        if p2:
-                            try:
-                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Foto 2")
-                            except Exception:
-                                pass
-        else:
+                else:
+                    if p1:
+                        try:
+                            await context.bot.send_photo(chat_id=driver.channel_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
+                        except Exception:
+                            pass
+                    if p2:
+                        try:
+                            await context.bot.send_photo(chat_id=driver.channel_id, photo=p2, caption="Foto 2 - Local/Porta")
+                        except Exception:
+                            pass
+            
+            # Envia progresso após as fotos
+            await context.bot.send_message(
+                chat_id=driver.channel_id,
+                text=progress_message
+            )
+            
+        except Exception as e:
+            # Se falhar, envia para os managers como fallback
+            await notify_managers(f"⚠️ Erro ao enviar para canal: {str(e)}\n\n{summary}", context)
+            
+            p1 = context.user_data.get("photo1_file_id")
+            p2 = context.user_data.get("photo2_file_id")
+            if p1 or p2:
+                dbm = SessionLocal()
+                try:
+                    managers = dbm.query(User).filter(User.role == "manager").all()
+                finally:
+                    dbm.close()
+                for m in managers:
+                    if p1:
+                        try:
+                            await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="Foto 1")
+                        except Exception:
+                            pass
+                    if p2:
+                        try:
+                            await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Foto 2")
+                        except Exception:
+                            pass
+    else:
             # Sem canal configurado - envia para os MANAGERS (comportamento original)
             await notify_managers(summary, context)
             
@@ -3233,12 +3279,8 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 except Exception:
                                     pass
                 
+                # ✅ FASE 2.2: REUTILIZA MESMA CONEXÃO PARA PROGRESSO
                 # Envia progresso após as fotos para os managers
-                dbm2 = SessionLocal()
-                try:
-                    managers = dbm2.query(User).filter(User.role == "manager").all()
-                finally:
-                    dbm2.close()
                 for m in managers:
                     try:
                         await context.bot.send_message(
@@ -3248,6 +3290,18 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception:
                         pass
 
+    # ✅ FASE 2.3: MENSAGEM FINAL DETALHADA COM SUCESSO
+    # Atualiza mensagem de preview para sucesso final
+    await preview_msg.edit_text(
+        f"✅ *Entrega Finalizada!*\n\n"
+        f"📦 Pacote{'s' if pkg_ids else ''}: {', '.join(delivered_codes[:3]) if delivered_codes else '-'}\n"
+        f"👤 Recebedor: {receiver_name}\n"
+        f"📍 Local: {primary_addr or '-'}\n"
+        f"⏰ Horário: {datetime.now().strftime('%H:%M')}\n\n"
+        f"✉️ Gerentes notificados com sucesso!",
+        parse_mode='Markdown'
+    )
+    
     # Monta link do mapa interativo para continuar a rota
     map_url = None
     try:
@@ -3256,31 +3310,23 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         map_url = None
 
-    final_msg = (
-        "✅ *Entrega Registrada!*\n\n"
-        f"📦 O pacote foi marcado como entregue.\n"
-        f"👔 Os gerentes foram notificados.\n\n"
-        + (f"🗺️ Abra o mapa para a próxima entrega:\n{map_url}\n\n" if map_url else "")
-        + "💡 _Continue para a próxima entrega no mapa!_"
-    )
-    await update.message.reply_text(
-        final_msg,
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode='Markdown'
-    )
-    
+    # ✅ FASE 2.3: BOTÃO PARA CONTINUAR (não repetir mensagem)
     # Botão rápido (opcional) para abrir o mapa
     if map_url:
         try:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="🗺️ Abrir mapa interativo",
+                text="🗺️ *Próxima Entrega*\n\n"
+                     f"📊 Progresso: {delivered_packages}/{total_packages} ({(delivered_packages/total_packages*100 if total_packages > 0 else 0):.0f}%)\n\n"
+                     "Abra o mapa para continuar:",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Abrir mapa", url=map_url)]
-                ])
+                    [InlineKeyboardButton("🗺️ Abrir Mapa", url=map_url)]
+                ]),
+                parse_mode='Markdown'
             )
         except Exception:
             pass
+    
     context.user_data.clear()
     return ConversationHandler.END
 
