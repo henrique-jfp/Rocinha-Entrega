@@ -91,6 +91,31 @@ FIN_KM, FIN_FUEL_YN, FIN_FUEL_TYPE, FIN_FUEL_LITERS, FIN_FUEL_AMOUNT = range(30,
 FIN_INCOME, FIN_SALARY_YN, FIN_SALARY_NAME, FIN_SALARY_AMOUNT, FIN_SALARY_MORE = range(35, 40)
 FIN_EXPENSE_CATEGORY, FIN_EXPENSE_AMOUNT, FIN_EXPENSE_MORE, FIN_EXPENSES, FIN_NOTES = range(40, 45)
 
+# ==================== CACHE SIMPLES PARA RELATÓRIOS ====================
+# Cache em memória para evitar reprocessar dados que mudam pouco
+# TTL de 5 minutos para estatísticas mensais
+_report_cache = {}
+_cache_ttl_seconds = 300  # 5 minutos
+
+def _get_cached_monthly_stats(month: int, year: int):
+    """Retorna estatísticas do cache se ainda válidas"""
+    cache_key = f"monthly_stats_{month}_{year}"
+    if cache_key in _report_cache:
+        cached_data, cached_time = _report_cache[cache_key]
+        age_seconds = (datetime.now() - cached_time).total_seconds()
+        if age_seconds < _cache_ttl_seconds:
+            logger.debug(f"Cache HIT para {cache_key} (idade: {age_seconds:.1f}s)")
+            return cached_data
+        else:
+            logger.debug(f"Cache EXPIRED para {cache_key} (idade: {age_seconds:.1f}s)")
+    return None
+
+def _set_cached_monthly_stats(month: int, year: int, data):
+    """Salva estatísticas no cache"""
+    cache_key = f"monthly_stats_{month}_{year}"
+    _report_cache[cache_key] = (data, datetime.now())
+    logger.debug(f"Cache SET para {cache_key}")
+
 
 # ==================== OTIMIZAÇÃO DE ROTA (TSP) ====================
 
@@ -832,10 +857,10 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Envia mensagem de processamento
+        # Envia mensagem de processamento inicial
         processing_msg = await update.message.reply_text(
-            "📊 *Gerando Relatório...*\n\n"
-            "⏳ Coletando dados financeiros e de entregas...",
+            "📊 *Gerando Relatório*\n\n"
+            "🔄 [▓░░░░░░░░░] 10% - Iniciando...",
             parse_mode='Markdown'
         )
         
@@ -843,35 +868,110 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         now = datetime.now()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         
-        # Dados de entregas (packages não tem created_at, usar route.created_at)
-        total_packages = db.query(Package).join(Route).filter(Route.created_at >= month_start).count()
-        delivered_packages = db.query(Package).join(Route).filter(
-            Route.created_at >= month_start,
-            Package.status == "delivered"
-        ).count()
-        failed_packages = db.query(Package).join(Route).filter(
-            Route.created_at >= month_start,
-            Package.status == "failed"
-        ).count()
+        # Verifica cache primeiro
+        cached_stats = _get_cached_monthly_stats(now.month, now.year)
         
-        # Dados de rotas
-        total_routes = db.query(Route).filter(Route.created_at >= month_start).count()
-        active_drivers = db.query(User).filter(User.role == "driver").count()
+        if cached_stats:
+            # Usa dados do cache (MUITO mais rápido)
+            await processing_msg.edit_text(
+                "📊 *Gerando Relatório*\n\n"
+                "🔄 [▓▓▓░░░░░░░] 30% - Usando dados em cache...",
+                parse_mode='Markdown'
+            )
+            (total_packages, delivered_packages, failed_packages, total_routes, 
+             active_drivers, total_income, total_expenses, total_mileage,
+             total_revenue, total_spent, total_km) = cached_stats
+        else:
+            # ETAPA 1: Coleta todos os dados em UMA ÚNICA QUERY otimizada (20%)
+            await processing_msg.edit_text(
+                "📊 *Gerando Relatório*\n\n"
+                "🔄 [▓▓░░░░░░░░] 20% - Coletando dados (query otimizada)...",
+                parse_mode='Markdown'
+            )
         
-        # Dados financeiros
-        total_income = db.query(Income).filter(Income.date >= month_start.date()).count()
-        total_expenses = db.query(Expense).filter(Expense.date >= month_start.date()).count()
-        total_mileage = db.query(Mileage).filter(Mileage.date >= month_start.date()).count()
+        # Query única com CTE (Common Table Expression) - MUITO mais rápido que 7 queries
+        from sqlalchemy import text, func
         
-        # Coleta dados financeiros detalhados
-        from sqlalchemy import func
+        monthly_stats = db.execute(text("""
+            WITH package_stats AS (
+                SELECT 
+                    COUNT(*) as total_packages,
+                    SUM(CASE WHEN p.status = 'delivered' THEN 1 ELSE 0 END) as delivered_packages,
+                    SUM(CASE WHEN p.status = 'failed' THEN 1 ELSE 0 END) as failed_packages
+                FROM package p
+                JOIN route r ON p.route_id = r.id
+                WHERE r.created_at >= :month_start
+            ),
+            route_stats AS (
+                SELECT 
+                    COUNT(*) as total_routes,
+                    (SELECT COUNT(*) FROM "user" WHERE role = 'driver') as active_drivers
+                FROM route
+                WHERE created_at >= :month_start
+            ),
+            finance_stats AS (
+                SELECT 
+                    (SELECT COUNT(*) FROM income WHERE date >= :month_date) as total_income_records,
+                    (SELECT COUNT(*) FROM expense WHERE date >= :month_date) as total_expense_records,
+                    (SELECT COUNT(*) FROM mileage WHERE date >= :month_date) as total_mileage_records,
+                    (SELECT COALESCE(SUM(amount), 0) FROM income WHERE date >= :month_date) as total_revenue,
+                    (SELECT COALESCE(SUM(amount), 0) FROM expense WHERE date >= :month_date) as total_spent,
+                    (SELECT COALESCE(SUM(km_total), 0) FROM mileage WHERE date >= :month_date) as total_km
+            )
+            SELECT 
+                ps.total_packages,
+                ps.delivered_packages,
+                ps.failed_packages,
+                rs.total_routes,
+                rs.active_drivers,
+                fs.total_income_records,
+                fs.total_expense_records,
+                fs.total_mileage_records,
+                fs.total_revenue,
+                fs.total_spent,
+                fs.total_km
+            FROM package_stats ps, route_stats rs, finance_stats fs
+        """), {
+            "month_start": month_start,
+            "month_date": month_start.date()
+        }).first()
         
-        total_revenue = db.query(func.sum(Income.amount)).filter(Income.date >= month_start.date()).scalar() or 0
-        total_spent = db.query(func.sum(Expense.amount)).filter(Expense.date >= month_start.date()).scalar() or 0
-        total_km = db.query(func.sum(Mileage.km_total)).filter(Mileage.date >= month_start.date()).scalar() or 0
+        # Extrai valores da query única
+        total_packages = monthly_stats[0] or 0
+        delivered_packages = monthly_stats[1] or 0
+        failed_packages = monthly_stats[2] or 0
+        total_routes = monthly_stats[3] or 0
+        active_drivers = monthly_stats[4] or 0
+        total_income = monthly_stats[5] or 0
+        total_expenses = monthly_stats[6] or 0
+        total_mileage = monthly_stats[7] or 0
+        total_revenue = float(monthly_stats[8] or 0)
+        total_spent = float(monthly_stats[9] or 0)
+        total_km = float(monthly_stats[10] or 0)
+        
+        # Salva no cache para próximas chamadas
+        _set_cached_monthly_stats(now.month, now.year, (
+            total_packages, delivered_packages, failed_packages, total_routes,
+            active_drivers, total_income, total_expenses, total_mileage,
+            total_revenue, total_spent, total_km
+        ))
+        
+        # ETAPA 2: Calcula métricas derivadas (35%)
+        await processing_msg.edit_text(
+            "📊 *Gerando Relatório*\n\n"
+            "🔄 [▓▓▓▓░░░░░░] 35% - Calculando métricas...",
+            parse_mode='Markdown'
+        )
         
         net_profit = total_revenue - total_spent
         profit_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else 0
+        
+        # ETAPA 4: Calcula dados por motorista (65%)
+        await processing_msg.edit_text(
+            "📊 *Gerando Relatório*\n\n"
+            "🔄 [▓▓▓▓▓▓▓░░░] 65% - Analisando performance individual...",
+            parse_mode='Markdown'
+        )
         
         # Calcula dados por motorista
         drivers = db.query(User).filter(User.role == "driver").all()
@@ -895,6 +995,13 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'delivered': driver_delivered,
                 'success_rate': (driver_delivered / driver_packages * 100) if driver_packages > 0 else 0
             })
+        
+        # ETAPA 5: Prepara prompt para IA (75%)
+        await processing_msg.edit_text(
+            "📊 *Gerando Relatório*\n\n"
+            "🔄 [▓▓▓▓▓▓▓▓░░] 75% - Preparando análise inteligente...",
+            parse_mode='Markdown'
+        )
         
         # Monta prompt profissional para a IA
         prompt = f"""Você é um analista financeiro senior especializado em logística e entregas. 
@@ -957,10 +1064,10 @@ INSTRUÇÕES CRÍTICAS PARA O RELATÓRIO:
 
 Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
 
-        # Atualiza mensagem
+        # ETAPA 6: Processamento com IA (85%)
         await processing_msg.edit_text(
-            "📊 *Gerando Relatório...*\n\n"
-            "📈 Analisando dados...",
+            "📊 *Gerando Relatório*\n\n"
+            "� [▓▓▓▓▓▓▓▓▓░] 85% - Processando com IA Groq...",
             parse_mode='Markdown'
         )
         
@@ -1020,6 +1127,13 @@ Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
                     # Se falhar ao salvar, apenas mostra o relatório
                     print(f"Aviso ao salvar relatório: {save_err}")
                     db.rollback()
+                
+                # ETAPA 7: Finalização (100%)
+                await processing_msg.edit_text(
+                    "📊 *Gerando Relatório*\n\n"
+                    "🔄 [▓▓▓▓▓▓▓▓▓▓] 100% - Finalizando...",
+                    parse_mode='Markdown'
+                )
                 
                 # Divide relatório em mensagens (limite Telegram: 4096 chars)
                 max_length = 4000
