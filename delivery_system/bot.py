@@ -661,14 +661,34 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "📊 */registrardia*\n"
                 "   └ Registra dados do dia\n"
                 "   └ KM rodados e combustível\n"
-                "   └ Receitas e despesas\n"
-                "   └ Salários pagos\n\n"
+                "   └ Receitas e despesas categorizada\n"
+                "   └ Salários pagos\n"
+                "   └ ✨ NOVO: Vincula a uma rota\n\n"
+                
+                "📋 */meus_registros*\n"
+                "   └ Visualiza todos os registros\n"
+                "   └ ✨ NOVO: Ver/editar/deletar dias\n"
+                "   └ Balance de lucro por dia\n"
+                "   └ Integrado com receitas e despesas\n\n"
                 
                 "🤖 */relatorio*\n"
                 "   └ Relatório inteligente com IA\n"
-                "   └ Análise de desempenho\n"
-                "   └ Insights financeiros\n"
-                "   └ Sugestões de otimização\n\n"
+                "   └ ✨ NOVO: Análise por ROTA\n"
+                "   └ Margem de lucro por rota\n"
+                "   └ Recomendações prescritivas\n"
+                "   └ ✨ NOVO: Enviado para canal\n\n"
+                
+                "💬 */chat_ia* ✨ NOVO\n"
+                "   └ Conversa interativa com IA\n"
+                "   └ Histórico de perguntas mantido\n"
+                "   └ Contexto de dados preservado\n"
+                "   └ Análise profunda de métricas\n\n"
+                
+                "📢 */configurar_canal_análise* ✨ NOVO\n"
+                "   └ Canal dedicado para relatórios\n"
+                "   └ Organiza análises em um lugar\n"
+                "   └ Histórico centralizado\n"
+                "   └ Manter chat privado limpo\n\n"
                 
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "⚙️ *RECURSOS AVANÇADOS*\n"
@@ -703,6 +723,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "💡 *DICAS PRO*\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 
+                "🆕 *NOVO: Melhorias IA & Análise* ✨\n"
+                "   • /chat_ia: Converse com seus dados!\n"
+                "   • /configurar_canal_análise: Organize relatórios\n"
+                "   • /meus_registros: Edite/delete dias\n"
+                "   • /registrardia agora vincula a ROTA\n"
+                "   • /relatorio com análise POR ROTA\n\n"
+                
                 "1️⃣ *Nomeie rotas* (ex: Zona Sul, Centro)\n"
                 "   → Facilita identificação\n\n"
                 
@@ -715,8 +742,14 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "4️⃣ *Use /rastrear* frequentemente\n"
                 "   → Acompanhe progresso real\n\n"
                 
-                "5️⃣ *Relatórios IA* semanalmente\n"
-                "   → Insights valiosos para decisões\n\n"
+                "5️⃣ *Configure /configurar_canal_análise*\n"
+                "   → Relatórios organizados\n\n"
+                
+                "6️⃣ *Use /chat_ia* para explorar dados\n"
+                "   → Respostas profundas com contexto\n\n"
+                
+                "7️⃣ *Registre com rota em /registrardia*\n"
+                "   → IA calcula margem por rota\n\n"
                 
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🚀 *WORKFLOW RECOMENDADO*\n"
@@ -730,18 +763,25 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "↓\n"
                 "✅ *4. Receber* notificações automáticas\n"
                 "↓\n"
-                "📊 *5. Registrar* finanças com /registrardia\n"
+                "📊 *5. Registrar* finanças com /registrardia ← VINCULA ROTA\n"
                 "↓\n"
-                "🤖 *6. Analisar* com /relatorio\n\n"
+                "💬 *6. Explorar* com /chat_ia (opcional)\n"
+                "↓\n"
+                "🤖 *7. Analisar* com /relatorio ← VÊ POR ROTA\n"
+                "↓\n"
+                "📢 *8. Receber* no /configurar_canal_análise ← AUTOMATIZADO\n\n"
                 
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 "🌟 *Sistema completo de gestão*\n"
                 "🌟 *Rastreamento em tempo real*\n"
                 "🌟 *Otimização inteligente*\n"
-                "🌟 *Relatórios com IA*\n\n"
+                "🌟 *Relatórios com IA avançada*\n"
+                "🌟 *Análise por ROTA (NOVO)*\n"
+                "🌟 *Chat com dados (NOVO)*\n\n"
                 
                 "💬 *Dúvidas?* Teste os comandos!\n"
-                "⚡ *Comece agora* com /importar"
+                "⚡ *Comece agora* com /importar\n"
+                "📚 *Documentação*: Veja arquivos MELHORIAS_*.md"
             )
         else:
             help_text = (
