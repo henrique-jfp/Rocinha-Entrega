@@ -11,6 +11,10 @@ from pydantic import BaseModel, ConfigDict
 from database import get_db_session, Package, Route, init_db, LinkToken
 import secrets
 
+# Logging estruturado e validadores
+from shared.logger import logger, log_api_request
+from shared.validators import validate_coordinates, log_validation_error
+
 
 class PackageOut(BaseModel):
     id: int
@@ -35,14 +39,28 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Delivery System API")
     
-    # Adicionar CORS para permitir requisições do mapa
+    # ═══════════════════════════════════════════════════════════
+    # CORS - Configuração de Segurança
+    # ═══════════════════════════════════════════════════════════
+    # Permite apenas origens específicas (configuradas via .env)
+    # Em desenvolvimento: http://localhost:8000
+    # Em produção: domínios autorizados (Railway, frontend, etc)
     from fastapi.middleware.cors import CORSMiddleware
+    
+    ALLOWED_ORIGINS = os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:8000"  # Padrão seguro para desenvolvimento
+    ).split(",")
+    
+    # Remove espaços em branco das origens
+    ALLOWED_ORIGINS = [origin.strip() for origin in ALLOWED_ORIGINS]
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Em produção, pode restringir a domínios específicos
+        allow_origins=ALLOWED_ORIGINS,  # ✅ Restrito a domínios específicos
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],  # Métodos HTTP específicos
+        allow_headers=["Content-Type", "Authorization"],  # Headers específicos
     )
 
     # Static and templates
@@ -57,20 +75,73 @@ def create_app() -> FastAPI:
 
     # Routes
     @app.get("/health")
-    def health():
-        return {"ok": True}
+    def health(db=Depends(get_db_session)):
+        """
+        Healthcheck endpoint melhorado
+        - Verifica conexão com banco de dados
+        - Retorna informações úteis para monitoramento
+        """
+        import time
+        from sqlalchemy import text
+        
+        start_time = time.time()
+        health_data = {
+            "status": "healthy",
+            "timestamp": start_time,
+            "checks": {}
+        }
+        
+        # Verifica conexão com banco de dados
+        try:
+            # Query simples para testar conexão (timeout de 5s)
+            db.execute(text("SELECT 1"))
+            db_latency = round((time.time() - start_time) * 1000, 2)  # ms
+            
+            health_data["checks"]["database"] = {
+                "status": "up",
+                "latency_ms": db_latency
+            }
+            logger.debug(f"Healthcheck: Database OK ({db_latency}ms)")
+            
+        except Exception as e:
+            health_data["status"] = "unhealthy"
+            health_data["checks"]["database"] = {
+                "status": "down",
+                "error": str(e)
+            }
+            logger.error("Healthcheck: Database FALHOU", exc_info=True)
+        
+        # Verifica variáveis de ambiente críticas
+        critical_env_vars = ["BOT_TOKEN", "DATABASE_URL"]
+        missing_vars = [var for var in critical_env_vars if not os.getenv(var)]
+        
+        if missing_vars:
+            health_data["status"] = "unhealthy"
+            health_data["checks"]["environment"] = {
+                "status": "incomplete",
+                "missing": missing_vars
+            }
+            logger.warning(f"Healthcheck: Variáveis faltando: {missing_vars}")
+        else:
+            health_data["checks"]["environment"] = {"status": "ok"}
+        
+        # Define status HTTP apropriado
+        status_code = 200 if health_data["status"] == "healthy" else 503
+        
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=health_data, status_code=status_code)
 
     @app.get("/route/{route_id}/packages", response_model=List[PackageOut])
     def get_route_packages(route_id: int, db=Depends(get_db_session)):
-        print(f"🔍 GET /route/{route_id}/packages - Buscando pacotes...")
+        logger.info(f"GET /route/{route_id}/packages - Buscando pacotes")
         
         try:
             route = db.query(Route).filter(Route.id == route_id).first()
             if not route:
-                print(f"❌ Rota {route_id} não encontrada!")
+                logger.warning(f"Rota {route_id} não encontrada")
                 raise HTTPException(status_code=404, detail="Route not found")
             
-            print(f"✅ Rota encontrada: {route.name}")
+            logger.debug(f"Rota encontrada: {route.name}")
             
             # Tenta ordenar por order_in_route, mas fallback para id se coluna não existir
             try:
@@ -80,9 +151,9 @@ def create_app() -> FastAPI:
                     .order_by(Package.order_in_route.asc(), Package.id.asc())
                     .all()
                 )
-                print(f"✅ Usando ordenação por order_in_route")
+                logger.debug("Usando ordenação por order_in_route")
             except Exception as e:
-                print(f"⚠️ order_in_route não existe, usando fallback: {e}")
+                logger.warning(f"order_in_route não existe, usando fallback por ID")
                 # Fallback se order_in_route não existir no banco
                 packages = (
                     db.query(Package)
@@ -91,27 +162,48 @@ def create_app() -> FastAPI:
                     .all()
                 )
             
-            print(f"📦 {len(packages)} pacotes encontrados")
-            for p in packages[:3]:  # Mostra os 3 primeiros
-                print(f"  - {p.tracking_code}: lat={p.latitude}, lng={p.longitude}, status={p.status}")
+            logger.info(f"{len(packages)} pacotes encontrados na rota {route_id}")
+            if packages:
+                logger.debug(f"Primeiros pacotes: {[p.tracking_code for p in packages[:3]]}")
             
             result = []
             for p in packages:
                 try:
+                    # Valida coordenadas do pacote antes de serializar
+                    if p.latitude is not None or p.longitude is not None:
+                        is_valid, error_msg = validate_coordinates(
+                            p.latitude, 
+                            p.longitude, 
+                            strict=False  # Não obriga Brasil (pode ter coordenadas inválidas antigas)
+                        )
+                        
+                        if not is_valid:
+                            logger.warning(
+                                f"Pacote {p.id} tem coordenadas inválidas: {error_msg}",
+                                extra={
+                                    "package_id": p.id,
+                                    "tracking_code": p.tracking_code,
+                                    "latitude": p.latitude,
+                                    "longitude": p.longitude
+                                }
+                            )
+                            # Define coordenadas como None se inválidas
+                            # (permite mapa funcionar mesmo com dados ruins)
+                            p.latitude = None
+                            p.longitude = None
+                    
                     item = PackageOut.model_validate(p)
                     result.append(item)
                 except Exception as e:
-                    print(f"❌ Erro ao serializar pacote {p.id}: {e}")
+                    logger.error(f"Erro ao serializar pacote {p.id}", exc_info=True)
                     raise HTTPException(status_code=500, detail=f"Serialization error for package {p.id}: {str(e)}")
             
-            print(f"✅ Retornando {len(result)} pacotes serializados")
+            logger.info(f"Retornando {len(result)} pacotes serializados para rota {route_id}")
             return result
         except HTTPException:
             raise
         except Exception as e:
-            print(f"❌ Erro geral em get_route_packages: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Erro geral em get_route_packages para rota {route_id}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Erro ao carregar pacotes: {str(e)}")
 
     @app.get("/map/{route_id}/{driver_id}", response_class=HTMLResponse)
@@ -165,6 +257,24 @@ def create_app() -> FastAPI:
 
     @app.post("/location/{driver_id}")
     def update_location(driver_id: int, loc: LocationIn):
+        """
+        Atualiza localização do motorista
+        Valida coordenadas antes de armazenar
+        """
+        # Valida coordenadas (strict=True para validar se está no Brasil)
+        is_valid, error_msg = validate_coordinates(
+            loc.latitude, 
+            loc.longitude, 
+            strict=True  # Requer coordenadas brasileiras
+        )
+        
+        if not is_valid:
+            log_validation_error("location", loc.model_dump(), error_msg)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Coordenadas inválidas: {error_msg}"
+            )
+        
         _latest_locations[driver_id] = {
             "driver_id": driver_id,
             "latitude": loc.latitude,
@@ -172,6 +282,8 @@ def create_app() -> FastAPI:
             "timestamp": loc.timestamp,
             "route_id": loc.route_id,
         }
+        
+        logger.debug(f"Localização atualizada para motorista {driver_id}: ({loc.latitude}, {loc.longitude})")
         return {"ok": True}
 
     @app.get("/location/{driver_id}")

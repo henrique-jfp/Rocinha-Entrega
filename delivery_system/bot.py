@@ -32,6 +32,9 @@ from database import (
     Expense, Income, Mileage, AIReport, LinkToken
 )
 
+# Logging estruturado
+from shared.logger import logger, log_bot_command
+
 
 # Configurações e diretórios
 load_dotenv()
@@ -60,14 +63,14 @@ if GROQ_API_KEY:
         groq_client = Groq(api_key=GROQ_API_KEY)
         # Modelos disponíveis (nov 2024): llama-3.3-70b-versatile, llama-3.1-8b-instant, gemma2-9b-it
         ai_model_name = "llama-3.3-70b-versatile"  # Modelo mais recente e poderoso
-        print("✅ Groq API inicializada com sucesso")
+        logger.info("Groq API inicializada com sucesso", extra={"model": ai_model_name})
     except Exception as e:
-        print(f"⚠️ Erro ao inicializar Groq API: {e}")
-        print("ℹ️ Relatórios com IA estarão indisponíveis")
+        logger.error("Erro ao inicializar Groq API", exc_info=True)
+        logger.warning("Relatórios com IA estarão indisponíveis")
         groq_client = None
         ai_model_name = None
 else:
-    print("⚠️ GROQ_API_KEY não configurada")
+    logger.warning("GROQ_API_KEY não configurada - relatórios com IA indisponíveis")
     
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
@@ -229,12 +232,20 @@ def parse_import_dataframe(df: pd.DataFrame) -> list[dict]:
         if col_lat and pd.notna(row.get(col_lat)):
             try:
                 lat = float(row[col_lat])
-            except Exception:
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    f"Não foi possível converter latitude: {row.get(col_lat)}",
+                    extra={"tracking_code": tracking_code, "error": str(e)}
+                )
                 lat = None
         if col_lng and pd.notna(row.get(col_lng)):
             try:
                 lng = float(row[col_lng])
-            except Exception:
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    f"Não foi possível converter longitude: {row.get(col_lng)}",
+                    extra={"tracking_code": tracking_code, "error": str(e)}
+                )
                 lng = None
 
         items.append(
@@ -283,8 +294,12 @@ async def notify_managers(text: str, context: ContextTypes.DEFAULT_TYPE):
     for m in managers:
         try:
             await context.bot.send_message(chat_id=m.telegram_user_id, text=text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(
+                f"Falha ao enviar notificação para gerente {m.telegram_user_id}",
+                exc_info=True,
+                extra={"manager_id": m.telegram_user_id, "error": str(e)}
+            )
 
 
 class DeliveryLinkError(Exception):
@@ -2001,7 +2016,17 @@ async def cmd_enviarrota(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"_Atualização automática a cada 30 segundos._",
                     parse_mode='Markdown'
                 )
-            except Exception:
+            except Exception as e:
+                logger.error(
+                    f"Falha ao enviar mensagem para motorista {driver_tid}",
+                    exc_info=True,
+                    extra={
+                        "driver_telegram_id": driver_tid,
+                        "route_id": route.id,
+                        "route_name": route_name,
+                        "error": str(e)
+                    }
+                )
                 await update.message.reply_text(
                     "⚠️ *Erro ao Enviar*\n\n"
                     "Não consegui enviar a mensagem ao motorista.\n\n"
@@ -2183,7 +2208,17 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💡 _Use este link para acompanhar em tempo real!_",
                 parse_mode='Markdown'
             )
-        except Exception:
+        except Exception as e:
+            logger.error(
+                f"Falha ao enviar rota {route.id} para motorista {driver_tid}",
+                exc_info=True,
+                extra={
+                    "route_id": route.id,
+                    "driver_telegram_id": driver_tid,
+                    "route_name": route_name,
+                    "error": str(e)
+                }
+            )
             await query.edit_message_text(
                 "⚠️ *Erro ao Enviar*\n\n"
                 "Não consegui enviar a mensagem ao motorista.\n\n"
@@ -2809,7 +2844,12 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             delivered_ids = [package.id]
             try:
                 delivered_codes = [package.tracking_code]
-            except Exception:
+            except AttributeError as e:
+                logger.error(
+                    f"Pacote {package.id} não tem tracking_code",
+                    exc_info=True,
+                    extra={"package_id": package.id}
+                )
                 delivered_codes = []
             db.commit()
 
