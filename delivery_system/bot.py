@@ -77,7 +77,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 
 # Estados de conversa
-IMPORT_ASK_NAME = 9
+# IMPORT_ASK_NAME = 9  # ✅ REMOVIDO: Nome da rota agora é detectado automaticamente da coluna AT ID
 IMPORT_WAITING_FILE = 10
 IMPORT_CONFIRMING = 11  # ✅ FASE 3.2: Novo estado para confirmação de importação
 PHOTO1, PHOTO2, NAME, DOC, NOTES = range(5)
@@ -237,6 +237,7 @@ def parse_import_dataframe(df: pd.DataFrame) -> tuple[list[dict], dict]:
         tuple: (items, detection_report)
         
         detection_report = {
+            'route_name': 'AT20251015EM37',  # Nome detectado da rota
             'columns_found': {'tracking': 'SPX TN', 'address': 'Destination Address', ...},
             'columns_missing': ['phone', 'neighborhood'],
             'rows_total': 150,
@@ -247,6 +248,7 @@ def parse_import_dataframe(df: pd.DataFrame) -> tuple[list[dict], dict]:
     """
     # ✅ FASE 3.1: RELATÓRIO DE DETECÇÃO
     report = {
+        'route_name': None,
         'columns_found': {},
         'columns_missing': [],
         'rows_total': len(df),
@@ -254,6 +256,17 @@ def parse_import_dataframe(df: pd.DataFrame) -> tuple[list[dict], dict]:
         'rows_skipped': 0,
         'warnings': []
     }
+    
+    # ✅ DETECÇÃO AUTOMÁTICA DO NOME DA ROTA (coluna AT ID)
+    col_route_id = _find_column(df, ["at id", "atid", "at_id", "route id", "route_id"])
+    if col_route_id and len(df) > 0:
+        # Pega o primeiro valor não vazio da coluna AT ID
+        for idx, row in df.iterrows():
+            route_name = str(row.get(col_route_id, "")).strip()
+            if route_name and len(route_name) > 2:
+                report['route_name'] = route_name
+                report['columns_found']['route_id'] = col_route_id
+                break
     
     col_tracking = _find_column(
         df,
@@ -2743,35 +2756,11 @@ async def cmd_importar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
     
     await update.message.reply_text(
-        "� *Importar Nova Rota*\n\n"
-        "Primeiro, me diga:\n\n"
-        "🏷️ *Qual é o nome desta rota?*\n\n"
-        "_Exemplo: Zona Sul, Centro, Barra, etc._",
-        parse_mode='Markdown'
-    )
-    return IMPORT_ASK_NAME
-
-
-async def handle_route_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe o nome da rota e pede o arquivo"""
-    route_name = update.message.text.strip()
-    
-    if not route_name or len(route_name) < 2:
-        await update.message.reply_text(
-            "⚠️ *Nome muito curto!*\n\n"
-            "Por favor, envie um nome com pelo menos 2 caracteres.",
-            parse_mode='Markdown'
-        )
-        return IMPORT_ASK_NAME
-    
-    # Salva o nome no contexto
-    context.user_data['route_name'] = route_name
-    
-    await update.message.reply_text(
-        f"✅ *Nome da Rota:* {route_name}\n\n"
-        "📂 *Agora envie o arquivo*\n\n"
+        "📥 *Importar Nova Rota*\n\n"
+        "📂 *Envie o arquivo da planilha*\n\n"
         "Formatos aceitos: Excel (.xlsx) ou CSV (.csv)\n\n"
         "*Colunas necessárias:*\n"
+        "• AT ID (nome da rota - obrigatório)\n"
         "• Código de Rastreio (obrigatório)\n"
         "• Endereço (obrigatório)\n"
         "• Latitude (opcional)\n"
@@ -2781,6 +2770,12 @@ async def handle_route_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     return IMPORT_WAITING_FILE
+
+
+# ✅ FUNÇÃO REMOVIDA: Nome da rota agora é detectado automaticamente da coluna AT ID
+# async def handle_route_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     """[DEPRECATED] Recebe o nome da rota e pede o arquivo"""
+#     # Essa função não é mais necessária pois o nome é detectado da coluna AT ID da planilha
 
 
 async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2839,14 +2834,17 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     with_neighborhood = sum(1 for i in items if i.get('neighborhood'))
     
     # Monta mensagem de preview
+    route_name = report.get('route_name', 'Nome não detectado')
     preview_text = (
         f"📊 *Análise da Planilha*\n\n"
-        f"📁 Arquivo: `{filename}`\n\n"
+        f"📁 Arquivo: `{filename}`\n"
+        f"📛 Rota: *{route_name}*\n\n"
         f"*Colunas Detectadas:*\n"
     )
     
     # Mostra colunas encontradas com emojis
     emoji_map = {
+        'route_id': '🆔',
         'tracking': '📦',
         'address': '🏠',
         'neighborhood': '🗺️',
@@ -2969,8 +2967,8 @@ async def on_import_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     db = SessionLocal()
     try:
-        # Pega o nome da rota do contexto (salvo em handle_route_name)
-        route_name = context.user_data.get('route_name', f"Rota {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        # ✅ Pega o nome da rota detectado automaticamente da planilha (AT ID)
+        route_name = report.get('route_name') or f"Rota {datetime.now().strftime('%d/%m/%Y %H:%M')}"
         
         # ✅ FASE 4.1: Cria rota com receita padrão e status pending
         route = Route(
@@ -5034,7 +5032,6 @@ def setup_bot_handlers(app: Application):
     import_conv = ConversationHandler(
         entry_points=[CommandHandler("importar", cmd_importar)],
         states={
-            IMPORT_ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_route_name)],
             IMPORT_WAITING_FILE: [MessageHandler(filters.Document.ALL, handle_import_file)],
             IMPORT_CONFIRMING: [
                 CallbackQueryHandler(on_import_confirm, pattern="^import_confirm$"),
