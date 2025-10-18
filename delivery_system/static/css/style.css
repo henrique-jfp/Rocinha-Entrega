@@ -84,12 +84,16 @@ body {
   display: flex;
   position: relative;
   overflow: hidden;
+  /* Evita problemas de overflow em flex no mobile */
+  min-height: 0;
 }
 
 #map-container {
   flex: 1;
   position: relative;
   background: var(--gray-light);
+  /* Permite o mapa ocupar toda a altura disponível */
+  min-height: 0;
 }
 
 #map {
@@ -109,10 +113,17 @@ body {
   z-index: 100;
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.05);
   transition: transform 0.3s ease;
+  /* Evita encolher incorretamente em layout flex no mobile */
+  min-height: 0;
 }
 
 #sidebar.hidden {
   transform: translateX(100%);
+}
+
+/* Itens ocultos pela busca */
+.list-item.hidden {
+  display: none !important;
 }
 
 /* =================== BUSCA =================== */
@@ -289,6 +300,7 @@ body {
   margin-bottom: 4px;
   line-height: 1.4;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -450,6 +462,10 @@ body {
   }
   
   #sidebar.hidden {
+    transform: translateX(100%);
+  }
+  /* Classe usada pelo JS para recolher a lista no mobile */
+  #sidebar.collapsed {
     transform: translateX(100%);
   }
   
@@ -679,6 +695,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }

@@ -1041,11 +1041,41 @@
   const sidebar = document.getElementById('sidebar');
   let sidebarCollapsed = false;
 
+  // No mobile, abre com a lista recolhida para o mapa aparecer
+  if (window.innerWidth <= 768) {
+    sidebarCollapsed = true;
+    sidebar.classList.add('collapsed');
+    toggleBtn.textContent = '📋';
+    toggleBtn.title = 'Mostrar Lista';
+  }
+
   toggleBtn.addEventListener('click', () => {
     sidebarCollapsed = !sidebarCollapsed;
     sidebar.classList.toggle('collapsed', sidebarCollapsed);
     toggleBtn.textContent = sidebarCollapsed ? '📋' : '✕';
     toggleBtn.title = sidebarCollapsed ? 'Mostrar Lista' : 'Ocultar Lista';
+    // Dá tempo da transição finalizar e ajusta o mapa
+    setTimeout(() => {
+      try { map.invalidateSize(); } catch {}
+    }, 320);
+  });
+
+  // Ajusta estado ao mudar orientação/tamanho
+  window.addEventListener('resize', () => {
+    const isMobile = window.innerWidth <= 768;
+    if (isMobile && !sidebarCollapsed) {
+      sidebarCollapsed = true;
+      sidebar.classList.add('collapsed');
+      toggleBtn.textContent = '📋';
+      toggleBtn.title = 'Mostrar Lista';
+    }
+    if (!isMobile && sidebarCollapsed) {
+      sidebarCollapsed = false;
+      sidebar.classList.remove('collapsed');
+      toggleBtn.textContent = '✕';
+      toggleBtn.title = 'Ocultar Lista';
+    }
+    try { map.invalidateSize(); } catch {}
   });
 
   // Busca na lista
