@@ -1925,6 +1925,123 @@ async def cmd_meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando de debug para diagnosticar problemas - APENAS GERENTE"""
+    db = SessionLocal()
+    try:
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await update.message.reply_text("⛔ Comando disponível apenas para gerentes.")
+            return
+        
+        # Coleta informações de debug
+        debug_info = []
+        
+        # 1. Informações do banco de dados
+        try:
+            routes_count = db.query(Route).count()
+            packages_count = db.query(Package).count()
+            drivers_count = db.query(User).filter(User.role == "driver").count()
+            debug_info.append(f"✅ **Banco de Dados OK**")
+            debug_info.append(f"   • Rotas: {routes_count}")
+            debug_info.append(f"   • Pacotes: {packages_count}")
+            debug_info.append(f"   • Motoristas: {drivers_count}")
+        except Exception as e:
+            debug_info.append(f"❌ **Erro no Banco:** `{str(e)[:100]}`")
+        
+        # 2. Última rota criada
+        try:
+            last_route = db.query(Route).order_by(Route.created_at.desc()).first()
+            if last_route:
+                debug_info.append(f"\n📦 **Última Rota:**")
+                debug_info.append(f"   • ID: {last_route.id}")
+                debug_info.append(f"   • Nome: {last_route.name or 'Sem nome'}")
+                debug_info.append(f"   • Status: {last_route.status}")
+                debug_info.append(f"   • Pacotes: {len(last_route.packages)}")
+                
+                # Verifica se tem os campos novos (migration)
+                if hasattr(last_route, 'revenue'):
+                    debug_info.append(f"   • Revenue: R$ {last_route.revenue:.2f}")
+                else:
+                    debug_info.append(f"   • ⚠️ **FALTA MIGRATION!** Coluna 'revenue' não existe")
+        except Exception as e:
+            debug_info.append(f"\n❌ **Erro ao buscar rota:** `{str(e)[:100]}`")
+        
+        # 3. Configuração do usuário
+        try:
+            debug_info.append(f"\n👤 **Suas Configurações:**")
+            debug_info.append(f"   • Role: {me.role}")
+            debug_info.append(f"   • TID: {me.telegram_user_id}")
+            debug_info.append(f"   • Canal: {me.channel_id or 'Não configurado'}")
+            if me.home_latitude and me.home_longitude:
+                debug_info.append(f"   • Casa: ✅ Configurada")
+            else:
+                debug_info.append(f"   • Casa: ❌ Não configurada")
+        except Exception as e:
+            debug_info.append(f"\n❌ **Erro nas configs:** `{str(e)[:50]}`")
+        
+        # 4. Variáveis de ambiente
+        try:
+            debug_info.append(f"\n⚙️ **Ambiente:**")
+            debug_info.append(f"   • Bot Token: {'✅ OK' if os.getenv('TELEGRAM_BOT_TOKEN') else '❌ FALTA'}")
+            debug_info.append(f"   • Database: {'✅ OK' if os.getenv('DATABASE_URL') else '❌ FALTA'}")
+            debug_info.append(f"   • Groq API: {'✅ OK' if os.getenv('GROQ_API_KEY') else '❌ FALTA'}")
+        except Exception as e:
+            debug_info.append(f"\n❌ **Erro env vars:** `{str(e)[:50]}`")
+        
+        # 5. Estrutura da tabela Route (verifica migration)
+        try:
+            from sqlalchemy import inspect
+            inspector = inspect(db.bind)
+            columns = inspector.get_columns('route')
+            column_names = [col['name'] for col in columns]
+            
+            debug_info.append(f"\n🗄️ **Colunas da Tabela 'route':**")
+            
+            # Colunas necessárias (da migration)
+            required_cols = ['revenue', 'driver_salary', 'status', 'completed_at', 
+                           'finalized_at', 'extra_expenses', 'extra_income', 'calculated_km']
+            
+            missing_cols = [col for col in required_cols if col not in column_names]
+            
+            if missing_cols:
+                debug_info.append(f"   ⚠️ **FALTAM {len(missing_cols)} COLUNAS:**")
+                for col in missing_cols:
+                    debug_info.append(f"      • `{col}`")
+                debug_info.append(f"\n   💡 **SOLUÇÃO:** Execute a migration!")
+                debug_info.append(f"   `python delivery_system/apply_route_automation.py`")
+            else:
+                debug_info.append(f"   ✅ Todas as colunas OK ({len(column_names)} total)")
+        except Exception as e:
+            debug_info.append(f"\n❌ **Erro ao verificar tabela:** `{str(e)[:100]}`")
+        
+        # Monta mensagem final
+        message = "🔧 **DEBUG SYSTEM**\n\n" + "\n".join(debug_info)
+        
+        # Adiciona instruções
+        message += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        message += "📋 **Como usar este relatório:**\n"
+        message += "1. Tire print desta mensagem\n"
+        message += "2. Mande para o desenvolvedor\n"
+        message += "3. Copie a parte com ❌ se houver\n\n"
+        message += "💡 **Comandos úteis:**\n"
+        message += "• `/meu_id` - Ver seu ID\n"
+        message += "• `/drivers` - Listar motoristas\n"
+        message += "• `/relatorio` - Testar relatório"
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+        
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ **Erro no Debug:**\n\n"
+            f"`{str(e)}`\n\n"
+            f"Mande este erro para o desenvolvedor!",
+            parse_mode='Markdown'
+        )
+    finally:
+        db.close()
+
+
 async def cmd_configurar_canal_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Configura canal dedicado para receber análises e relatórios"""
     db = SessionLocal()
@@ -5251,6 +5368,7 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CallbackQueryHandler(help_callback_handler, pattern=r"^help_"))
     app.add_handler(CommandHandler("meu_id", cmd_meu_id))
+    app.add_handler(CommandHandler("debug", cmd_debug))
     app.add_handler(CommandHandler("rotas", cmd_rotas))
     app.add_handler(CallbackQueryHandler(on_view_route, pattern=r"^view_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_track_view_route, pattern=r"^track_view_route:\d+$"))
