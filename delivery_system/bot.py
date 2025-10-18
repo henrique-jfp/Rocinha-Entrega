@@ -93,6 +93,9 @@ FIN_KM, FIN_FUEL_YN, FIN_FUEL_TYPE, FIN_FUEL_LITERS, FIN_FUEL_AMOUNT = range(30,
 FIN_INCOME, FIN_SALARY_YN, FIN_SALARY_NAME, FIN_SALARY_AMOUNT, FIN_SALARY_MORE = range(35, 40)
 FIN_EXPENSE_CATEGORY, FIN_EXPENSE_AMOUNT, FIN_EXPENSE_MORE, FIN_EXPENSES, FIN_NOTES = range(40, 45)
 
+# Estados para finalização de rota
+FINALIZE_KM, FINALIZE_EXTRA_EXPENSES, FINALIZE_EXTRA_INCOME = range(60, 63)
+
 # ==================== CACHE SIMPLES PARA RELATÓRIOS ====================
 # Cache em memória para evitar reprocessar dados que mudam pouco
 # TTL de 5 minutos para estatísticas mensais
@@ -1678,41 +1681,12 @@ async def on_finalize_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         total_packages = db.query(Package).filter(Package.route_id == route_id).count()
         
-        # ✅ Calcula KM automaticamente baseado nos pacotes entregues
-        packages = db.query(Package).filter(
-            Package.route_id == route_id,
-            Package.status == "delivered"
-        ).order_by(Package.order_in_route).all()
-        
-        total_km = 0
-        if driver and driver.home_latitude and driver.home_longitude:
-            current_lat, current_lng = driver.home_latitude, driver.home_longitude
-            
-            for pkg in packages:
-                if pkg.latitude and pkg.longitude:
-                    distance = haversine_distance(current_lat, current_lng, pkg.latitude, pkg.longitude)
-                    total_km += distance
-                    current_lat, current_lng = pkg.latitude, pkg.longitude
-            
-            # Volta para casa (opcional)
-            if packages and packages[-1].latitude and packages[-1].longitude:
-                distance_home = haversine_distance(
-                    packages[-1].latitude, packages[-1].longitude,
-                    driver.home_latitude, driver.home_longitude
-                )
-                total_km += distance_home
-        
-        # Salva KM calculado
-        route.calculated_km = total_km
-        db.commit()
-        
         # Monta resumo
         summary = (
             f"📊 *Finalizar Rota*\n\n"
             f"📛 {route_name}\n"
             f"👤 Motorista: {driver_name}\n"
-            f"📦 Pacotes Entregues: {total_packages}\n"
-            f"🚗 KM Rodados: ~{total_km:.1f} km\n\n"
+            f"📦 Pacotes Entregues: {total_packages}\n\n"
             f"💰 *Financeiro:*\n"
             f"✅ Receita: R$ {route.revenue:.2f}\n"
             f"💼 Salário: R$ {route.driver_salary:.2f}\n"
@@ -1722,7 +1696,7 @@ async def on_finalize_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         keyboard = [
-            [InlineKeyboardButton("✅ Não, finalizar assim", callback_data=f"finalize_confirm:{route_id}")],
+            [InlineKeyboardButton("✅ Não, continuar", callback_data=f"finalize_no_expenses:{route_id}")],
             [InlineKeyboardButton("💸 Sim, adicionar despesas", callback_data=f"finalize_add_expenses:{route_id}")],
             [InlineKeyboardButton("📝 Adicionar receita extra", callback_data=f"finalize_add_income:{route_id}")],
             [InlineKeyboardButton("❌ Cancelar", callback_data=f"view_route:{route_id}")]
@@ -1736,6 +1710,154 @@ async def on_finalize_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     finally:
         db.close()
+
+
+async def on_finalize_no_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback quando usuário não tem despesas extras - pede KM"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("finalize_no_expenses:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    
+    # Salva route_id no contexto
+    context.user_data['finalize_route_id'] = route_id
+    context.user_data['finalize_extra_expenses'] = 0.0
+    context.user_data['finalize_extra_income'] = 0.0
+    
+    await query.edit_message_text(
+        "🚗 *Quantos KM você rodou hoje?*\n\n"
+        "_(Considere apenas o deslocamento Ilha ↔ Rocinha)_\n\n"
+        "Digite a kilometragem (ex: 45):",
+        parse_mode='Markdown'
+    )
+    
+    return FINALIZE_KM
+
+
+async def on_finalize_add_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para adicionar despesas extras - stub por enquanto"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("finalize_add_expenses:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    
+    keyboard = [[InlineKeyboardButton("⬅️ Voltar para Rota", callback_data=f"view_route:{route_id}")]]
+    
+    await query.edit_message_text(
+        "🚧 *Funcionalidade em desenvolvimento*\n\n"
+        f"Por enquanto, use /registradia para adicionar despesas extras.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+
+async def on_finalize_add_income(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para adicionar receita extra - stub por enquanto"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("finalize_add_income:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    
+    keyboard = [[InlineKeyboardButton("⬅️ Voltar para Rota", callback_data=f"view_route:{route_id}")]]
+    
+    await query.edit_message_text(
+        "🚧 *Funcionalidade em desenvolvimento*\n\n"
+        f"Por enquanto, use /registradia para adicionar receitas extras.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+
+async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe a kilometragem informada e finaliza a rota"""
+    try:
+        km = float(update.message.text.replace(',', '.').strip())
+        if km < 0:
+            raise ValueError
+        
+        route_id = context.user_data.get('finalize_route_id')
+        extra_expenses = context.user_data.get('finalize_extra_expenses', 0.0)
+        extra_income = context.user_data.get('finalize_extra_income', 0.0)
+        
+        if not route_id:
+            await update.message.reply_text("❌ Erro: rota não encontrada. Use /rotas para tentar novamente.")
+            return ConversationHandler.END
+        
+        db = SessionLocal()
+        try:
+            route = db.get(Route, route_id)
+            if not route or route.status != "completed":
+                await update.message.reply_text("❌ Rota não pode ser finalizada!")
+                return ConversationHandler.END
+            
+            # ✅ Salva KM informado
+            route.calculated_km = km
+            route.extra_expenses = extra_expenses
+            route.extra_income = extra_income
+            
+            # ✅ Confirma a despesa de salário
+            expenses = db.query(Expense).filter(
+                Expense.route_id == route_id,
+                Expense.confirmed == False
+            ).all()
+            
+            for expense in expenses:
+                expense.confirmed = True
+            
+            # ✅ Marca rota como finalizada
+            route.status = "finalized"
+            route.finalized_at = datetime.now()
+            db.commit()
+            
+            # Busca informações para mensagem final
+            route_name = route.name or f"Rota {route_id}"
+            driver = db.get(User, route.assigned_to_id) if route.assigned_to_id else None
+            driver_name = driver.full_name if driver else "N/A"
+            
+            success_text = (
+                f"✅ *Rota Finalizada!*\n\n"
+                f"📛 {route_name}\n"
+                f"👤 Motorista: {driver_name}\n"
+                f"🚗 KM Rodados: {km:.1f} km\n\n"
+                f"💰 *Resumo Final:*\n"
+                f"✅ Receita: R$ {route.revenue:.2f}\n"
+                f"💼 Salário: R$ {route.driver_salary:.2f}\n"
+                f"💸 Despesas Extras: R$ {extra_expenses:.2f}\n"
+                f"💵 Receitas Extras: R$ {extra_income:.2f}\n\n"
+                f"📊 *Lucro Líquido:* R$ {route.revenue + extra_income - route.driver_salary - extra_expenses:.2f}\n\n"
+                f"✅ Todos os registros financeiros foram confirmados!\n\n"
+                f"💡 Use /relatorio para ver o resumo mensal completo."
+            )
+            
+            await update.message.reply_text(success_text, parse_mode='Markdown')
+            
+            # Limpa contexto
+            context.user_data.pop('finalize_route_id', None)
+            context.user_data.pop('finalize_extra_expenses', None)
+            context.user_data.pop('finalize_extra_income', None)
+            
+        finally:
+            db.close()
+            
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Valor inválido. Digite apenas números (ex: 45 ou 52.5):"
+        )
+        return FINALIZE_KM
+    
+    return ConversationHandler.END
 
 
 async def on_finalize_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4952,6 +5074,24 @@ def setup_bot_handlers(app: Application):
         persistent=False,
     )
     app.add_handler(config_home_conv)
+    
+    # Conversation handler para finalização de rota com entrada de KM
+    finalize_route_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(on_finalize_no_expenses, pattern=r"^finalize_no_expenses:\d+$"),
+        ],
+        states={
+            FINALIZE_KM: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_km_input)],
+        },
+        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
+        name="finalize_route_conv",
+        persistent=False,
+    )
+    app.add_handler(finalize_route_conv)
+    
+    # Callbacks para adicionar despesas/receitas extras (stub)
+    app.add_handler(CallbackQueryHandler(on_finalize_add_expenses, pattern=r"^finalize_add_expenses:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_finalize_add_income, pattern=r"^finalize_add_income:\d+$"))
     
     # Conversation handler para enviar rota
     send_route_conv = ConversationHandler(
