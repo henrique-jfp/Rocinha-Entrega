@@ -5,7 +5,10 @@ from typing import Optional, List
 from math import radians, sin, cos, sqrt, asin
 
 import pandas as pd
-from groq import Groq
+try:
+    from groq import Groq  # type: ignore
+except Exception:
+    Groq = None  # Import opcional; IA fica desativada se não disponível
 from dotenv import load_dotenv
 from telegram import (
     Update,
@@ -59,7 +62,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 groq_client = None
 ai_model_name = None
 
-if GROQ_API_KEY:
+if GROQ_API_KEY and Groq is not None:
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
         # Modelos disponíveis (nov 2024): llama-3.3-70b-versatile, llama-3.1-8b-instant, gemma2-9b-it
@@ -3774,8 +3777,24 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     local_path = IMPORTS_DIR / filename
     await file.download_to_drive(local_path)
 
-    # ✅ FASE 3.2: PARSE COM RELATÓRIO
-    df = pd.read_excel(local_path) if suffix == ".xlsx" else pd.read_csv(local_path)
+    # ✅ FASE 3.2: PARSE COM RELATÓRIO (robusto)
+    try:
+        if suffix == ".xlsx":
+            df = pd.read_excel(local_path)
+        else:
+            # CSV: tenta UTF-8 e fallback latin-1
+            try:
+                df = pd.read_csv(local_path)
+            except Exception:
+                df = pd.read_csv(local_path, encoding="latin-1", sep=",")
+    except Exception as read_err:
+        await processing_msg.edit_text(
+            "❌ *Erro ao Ler Arquivo*\n\n"
+            "Não consegui abrir a planilha. Verifique o formato/codificação e tente novamente.\n\n"
+            f"Detalhes: `{str(read_err)[:200]}`",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
     items, report = parse_import_dataframe(df)
     
     if not items:
@@ -4957,17 +4976,17 @@ async def cmd_meus_registros(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Busca datas em Mileage, Expense e Income
         mileage_dates = db.query(Mileage.date).filter(
             Mileage.date >= month_start.date(),
-            Mileage.created_by == user.id
+            Mileage.created_by == (user.telegram_user_id if user else update.effective_user.id)
         ).all()
         
         expense_dates = db.query(Expense.date).filter(
             Expense.date >= month_start.date(),
-            Expense.created_by == user.id
+            Expense.created_by == (user.telegram_user_id if user else update.effective_user.id)
         ).all()
         
         income_dates = db.query(Income.date).filter(
             Income.date >= month_start.date(),
-            Income.created_by == user.id
+            Income.created_by == (user.telegram_user_id if user else update.effective_user.id)
         ).all()
         
         # Combina todas as datas únicas
@@ -5064,6 +5083,7 @@ async def on_view_fin_record(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif data.startswith("view_fin_record_by_date:"):
         date_str = data.split(":", 1)[1]
         record_date = datetime.strptime(date_str, "%Y%m%d").date()
+        # Usa o Telegram ID do usuário atual para filtrar registros do próprio gerente
         user_id = update.effective_user.id
     else:
         return
@@ -5338,6 +5358,95 @@ async def on_back_to_fin_records(update: Update, context: ContextTypes.DEFAULT_T
     await cmd_meus_registros(update, context)
 
 
+# ==================== COMANDOS UTILITÁRIOS PENDENTES ====================
+async def cmd_rastrear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra rotas ativas e botões para abrir o mapa de cada uma (para gerentes)."""
+    db = SessionLocal()
+    try:
+        me = get_user_by_tid(db, update.effective_user.id)
+        if not me or me.role != "manager":
+            await update.message.reply_text(
+                "⛔ *Acesso Negado*\n\nApenas gerentes podem rastrear rotas.",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Rotas em andamento (assigned e não finalizadas)
+        routes = db.query(Route).filter(Route.assigned_to_id.isnot(None)).filter(
+            Route.status.notin_(["completed", "finalized"])  # type: ignore
+        ).order_by(Route.created_at.desc()).all()
+
+        if not routes:
+            await update.message.reply_text(
+                "📭 *Nenhuma rota ativa no momento.*\n\nUse /enviarrota para iniciar uma.",
+                parse_mode='Markdown'
+            )
+            return
+
+        for route in routes[:10]:
+            driver = route.assigned_to
+            driver_name = driver.full_name if driver and driver.full_name else f"ID {getattr(driver, 'telegram_user_id', '—')}"
+            total = db.query(Package).filter(Package.route_id == route.id).count()
+            delivered = db.query(Package).filter(Package.route_id == route.id, Package.status == "delivered").count()
+            pending = total - delivered
+            map_link = None
+            try:
+                if driver and getattr(driver, "telegram_user_id", None):
+                    map_link = f"{BASE_URL}/map/{route.id}/{driver.telegram_user_id}"
+            except Exception:
+                pass
+
+            text = (
+                f"🗺️ *Rastreamento*\n\n"
+                f"📦 Rota: {route.name or route.id}\n"
+                f"👤 Motorista: {driver_name}\n"
+                f"📊 Pendentes: {pending} | Entregues: {delivered} | Total: {total}"
+            )
+            if map_link:
+                await update.message.reply_text(
+                    text + f"\n\n🔗 {map_link}",
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
+                )
+            else:
+                await update.message.reply_text(text, parse_mode='Markdown')
+    finally:
+        db.close()
+
+
+async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Perguntas rápidas para IA Groq com contexto básico. Se GROQ_API_KEY faltar, avisa."""
+    question = _extract_command_argument(update, context)
+    if not question:
+        await update.message.reply_text(
+            "💬 *Chat IA*\n\nEnvie a pergunta junto do comando. Exemplo:\n/chat_ia Quantos pacotes entregues este mês?",
+            parse_mode='Markdown'
+        )
+        return
+
+    if not groq_client or not ai_model_name:
+        await update.message.reply_text(
+            "⚠️ IA indisponível. Configure GROQ_API_KEY para usar /chat_ia.",
+            parse_mode='Markdown'
+        )
+        return
+
+    try:
+        resp = groq_client.chat.completions.create(
+            model=ai_model_name,
+            messages=[
+                {"role": "system", "content": "Você é um assistente de operações de logística. Responda em pt-BR de forma objetiva."},
+                {"role": "user", "content": question},
+            ],
+            temperature=0.3,
+            max_tokens=600,
+        )
+        answer = resp.choices[0].message.content.strip()
+        await update.message.reply_text(f"🤖 {answer}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro na IA: {str(e)[:200]}")
+
+
 async def _post_init(application):
     """Executa após inicialização da Application: garante que webhook esteja desabilitado."""
     try:
@@ -5380,6 +5489,10 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
     app.add_handler(CommandHandler("configurar_canal_analise", cmd_configurar_canal_analise))
     app.add_handler(CommandHandler("meus_registros", cmd_meus_registros))
+    app.add_handler(CommandHandler("rastrear", cmd_rastrear))
+    app.add_handler(CommandHandler("restrear", cmd_rastrear))
+    app.add_handler(CommandHandler("chat_ia", cmd_chat_ia))
+    app.add_handler(CommandHandler("chatia", cmd_chat_ia))
     app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record:"))
     app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record_by_date:"))
     app.add_handler(CallbackQueryHandler(on_edit_fin_record, pattern=r"^edit_fin_record:"))
