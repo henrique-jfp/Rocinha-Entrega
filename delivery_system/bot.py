@@ -31,6 +31,7 @@ from database import (
     SessionLocal, init_db, User, Route, Package, DeliveryProof,
     Expense, Income, Mileage, AIReport, LinkToken
 )
+from sqlalchemy import func, text  # ✅ FASE 4.1: Importa func para queries SQL
 
 # Logging estruturado
 from shared.logger import logger, log_bot_command
@@ -959,8 +960,6 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         
         # Query única com CTE (Common Table Expression) - MUITO mais rápido que 7 queries
-        from sqlalchemy import text, func
-        
         monthly_stats = db.execute(text("""
             WITH package_stats AS (
                 SELECT 
@@ -1561,8 +1560,14 @@ async def on_view_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Cria keyboard com opções
         keyboard = []
         
+        # ✅ FASE 4.3: Botão de finalização para rotas completed
+        if route.status == "completed":
+            keyboard.append([
+                InlineKeyboardButton(text="✅ Finalizar Rota", callback_data=f"finalize_route:{route.id}")
+            ])
+        
         # Opção de rastreamento (apenas se tem motorista e não está concluída)
-        if route.assigned_to_id and not (total_packages > 0 and delivered_packages == total_packages):
+        if route.assigned_to_id and route.status not in ["completed", "finalized"]:
             keyboard.append([
                 InlineKeyboardButton(text="🗺️ Rastrear", callback_data=f"track_view_route:{route.id}")
             ])
@@ -1639,6 +1644,155 @@ async def on_track_view_route(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         await query.edit_message_text(
             track_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
+# ✅ FASE 4.3: CALLBACKS PARA FINALIZAÇÃO DE ROTA
+async def on_finalize_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para iniciar finalização de rota"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("finalize_route:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        route = db.get(Route, route_id)
+        if not route or route.status != "completed":
+            await query.answer("❌ Rota não pode ser finalizada!", show_alert=True)
+            return
+        
+        # Busca informações
+        route_name = route.name or f"Rota {route.id}"
+        driver = db.get(User, route.assigned_to_id) if route.assigned_to_id else None
+        driver_name = driver.full_name if driver else "N/A"
+        
+        total_packages = db.query(Package).filter(Package.route_id == route_id).count()
+        
+        # ✅ Calcula KM automaticamente baseado nos pacotes entregues
+        packages = db.query(Package).filter(
+            Package.route_id == route_id,
+            Package.status == "delivered"
+        ).order_by(Package.order_in_route).all()
+        
+        total_km = 0
+        if driver and driver.home_latitude and driver.home_longitude:
+            current_lat, current_lng = driver.home_latitude, driver.home_longitude
+            
+            for pkg in packages:
+                if pkg.latitude and pkg.longitude:
+                    distance = haversine_distance(current_lat, current_lng, pkg.latitude, pkg.longitude)
+                    total_km += distance
+                    current_lat, current_lng = pkg.latitude, pkg.longitude
+            
+            # Volta para casa (opcional)
+            if packages and packages[-1].latitude and packages[-1].longitude:
+                distance_home = haversine_distance(
+                    packages[-1].latitude, packages[-1].longitude,
+                    driver.home_latitude, driver.home_longitude
+                )
+                total_km += distance_home
+        
+        # Salva KM calculado
+        route.calculated_km = total_km
+        db.commit()
+        
+        # Monta resumo
+        summary = (
+            f"📊 *Finalizar Rota*\n\n"
+            f"📛 {route_name}\n"
+            f"👤 Motorista: {driver_name}\n"
+            f"📦 Pacotes Entregues: {total_packages}\n"
+            f"🚗 KM Rodados: ~{total_km:.1f} km\n\n"
+            f"💰 *Financeiro:*\n"
+            f"✅ Receita: R$ {route.revenue:.2f}\n"
+            f"💼 Salário: R$ {route.driver_salary:.2f}\n"
+            f"📊 Lucro Bruto: R$ {route.revenue - route.driver_salary:.2f}\n\n"
+            f"💡 Teve despesas extras nesta rota?\n"
+            f"(combustível, pedágio, manutenção, etc)"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Não, finalizar assim", callback_data=f"finalize_confirm:{route_id}")],
+            [InlineKeyboardButton("💸 Sim, adicionar despesas", callback_data=f"finalize_add_expenses:{route_id}")],
+            [InlineKeyboardButton("📝 Adicionar receita extra", callback_data=f"finalize_add_income:{route_id}")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data=f"view_route:{route_id}")]
+        ]
+        
+        await query.edit_message_text(
+            summary,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+    finally:
+        db.close()
+
+
+async def on_finalize_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para confirmar finalização sem despesas extras"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data or ""
+    if not data.startswith("finalize_confirm:"):
+        return
+    
+    route_id = int(data.split(":", 1)[1])
+    
+    db = SessionLocal()
+    try:
+        route = db.get(Route, route_id)
+        if not route or route.status != "completed":
+            await query.answer("❌ Rota não pode ser finalizada!", show_alert=True)
+            return
+        
+        # ✅ Confirma a despesa de salário
+        expenses = db.query(Expense).filter(
+            Expense.route_id == route_id,
+            Expense.confirmed == False
+        ).all()
+        
+        for expense in expenses:
+            expense.confirmed = True
+        
+        # ✅ Marca rota como finalizada
+        route.status = "finalized"
+        route.finalized_at = datetime.now()
+        db.commit()
+        
+        # Busca informações para mensagem final
+        route_name = route.name or f"Rota {route_id}"
+        driver = db.get(User, route.assigned_to_id) if route.assigned_to_id else None
+        driver_name = driver.full_name if driver else "N/A"
+        
+        success_text = (
+            f"✅ *Rota Finalizada!*\n\n"
+            f"📛 {route_name}\n"
+            f"👤 Motorista: {driver_name}\n\n"
+            f"💰 *Resumo Final:*\n"
+            f"✅ Receita: R$ {route.revenue:.2f}\n"
+            f"💼 Salário: R$ {route.driver_salary:.2f}\n"
+            f"💸 Despesas Extras: R$ {route.extra_expenses:.2f}\n"
+            f"💵 Receitas Extras: R$ {route.extra_income:.2f}\n\n"
+            f"📊 *Lucro Líquido:* R$ {route.revenue + route.extra_income - route.driver_salary - route.extra_expenses:.2f}\n\n"
+            f"✅ Todos os registros financeiros foram confirmados!\n\n"
+            f"💡 Use /relatorio para ver o resumo mensal completo."
+        )
+        
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar para Rotas", callback_data="back_to_routes")]]
+        
+        await query.edit_message_text(
+            success_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -2328,7 +2482,36 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.add(driver)
             db.flush()
         
+        # ✅ FASE 4.1: Calcula salário automaticamente (100 ou 150)
+        today = datetime.now().date()
+        routes_today = db.query(Route).filter(
+            Route.assigned_to_id == driver.id,
+            func.date(Route.created_at) == today,
+            Route.status.in_(["in_progress", "completed", "finalized"])
+        ).count()
+        
+        # Primeira rota = 100, segunda+ = 50
+        driver_salary = 100.0 if routes_today == 0 else 50.0
+        
+        # Atualiza rota
         route.assigned_to_id = driver.id
+        route.driver_salary = driver_salary
+        route.status = "in_progress"
+        
+        # ✅ FASE 4.1: Cria Expense do salário (pendente de confirmação)
+        me = get_user_by_tid(db, update.effective_user.id)
+        expense = Expense(
+            date=today,
+            type="salario",
+            description=f"Salário - {driver.full_name or f'ID {driver_tid}'} - {route.name or f'Rota {route.id}'}",
+            amount=driver_salary,
+            employee_name=driver.full_name or f"ID {driver_tid}",
+            route_id=route.id,
+            confirmed=False,  # ✅ Só confirma quando finalizar a rota
+            created_by=me.telegram_user_id if me else update.effective_user.id
+        )
+        db.add(expense)
+        
         db.commit()
         
         # Informações básicas
@@ -2341,7 +2524,8 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏳ *Processando Rota...*\n\n"
             f"📦 *Rota:* {route_name}\n"
             f"👤 *Motorista:* {driver_name}\n"
-            f"📊 *Pacotes:* {count}\n\n"
+            f"📊 *Pacotes:* {count}\n"
+            f"💼 *Salário:* R$ {driver_salary:.2f} ({'1ª rota do dia' if driver_salary == 100 else '2ª+ rota'})\n\n"
             f"🔄 _Otimizando sequência de entregas..._",
             parse_mode='Markdown'
         )
@@ -2386,7 +2570,11 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👤 *Motorista:* {driver_name}\n"
                 f"📊 *Pacotes:* {count}\n"
                 f"{opt_msg}\n\n"
-                f"🗺️ *Link de Rastreamento:*\n"
+                f"� *Financeiro:*\n"
+                f"💵 Receita: R$ {route.revenue:.2f}\n"
+                f"💼 Salário: R$ {driver_salary:.2f}\n"
+                f"📊 Lucro Bruto: R$ {route.revenue - driver_salary:.2f}\n\n"
+                f"�🗺️ *Link de Rastreamento:*\n"
                 f"{link}\n\n"
                 f"💡 _Use este link para acompanhar em tempo real!_",
                 parse_mode='Markdown'
@@ -2661,9 +2849,26 @@ async def on_import_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Pega o nome da rota do contexto (salvo em handle_route_name)
         route_name = context.user_data.get('route_name', f"Rota {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-        route = Route(name=route_name)
+        
+        # ✅ FASE 4.1: Cria rota com receita padrão e status pending
+        route = Route(
+            name=route_name,
+            revenue=260.0,
+            status="pending"
+        )
         db.add(route)
         db.flush()
+        
+        # ✅ FASE 4.1: Cria Income automaticamente
+        me = get_user_by_tid(db, update.effective_user.id)
+        income = Income(
+            date=datetime.now().date(),
+            amount=260.0,
+            route_id=route.id,
+            description=f"Receita da rota: {route_name}",
+            created_by=me.telegram_user_id if me else update.effective_user.id
+        )
+        db.add(income)
         
         # Adiciona pacotes em batch para melhor performance
         packages = []
@@ -2684,12 +2889,13 @@ async def on_import_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.add_all(packages)
         db.commit()
         
-        # ✅ FASE 3.3: MENSAGEM FINAL COM RESUMO COMPLETO
+        # ✅ FASE 4.1: MENSAGEM FINAL COM RECEITA AUTOMÁTICA
         success_text = (
             f"✅ *Pacotes Importados com Sucesso!*\n\n"
             f"🆔 ID da Rota: `{route.id}`\n"
             f"📛 Nome: {route_name}\n"
-            f"📦 Total de Pacotes: *{len(items)}*\n\n"
+            f"📦 Total de Pacotes: *{len(items)}*\n"
+            f"💰 Receita: R$ {route.revenue:.2f} _(registrada automaticamente)_\n\n"
         )
         
         # Adiciona estatísticas de qualidade
@@ -3296,6 +3502,24 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     Package.status == "delivered"
                 ).count()
                 remaining_packages = max(0, total_packages - delivered_packages)
+                
+                # ✅ FASE 4.2: DETECÇÃO AUTOMÁTICA DE ROTA COMPLETA
+                if total_packages > 0 and delivered_packages == total_packages:
+                    # Todos os pacotes foram entregues!
+                    route_obj.status = "completed"
+                    route_obj.completed_at = datetime.now()
+                    db.commit()
+                    
+                    logger.info(
+                        f"Rota {route_id} automaticamente marcada como completa",
+                        extra={
+                            "route_id": route_id,
+                            "route_name": route_name,
+                            "total_packages": total_packages,
+                            "driver_id": driver.id if driver else None
+                        }
+                    )
+                
             except Exception:
                 route_name = f"Rota {route_id}"
         
@@ -3318,6 +3542,28 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     finally:
         db.close()
+    
+    # ✅ FASE 4.2: NOTIFICA GERENTES SE ROTA FOI COMPLETADA
+    if route_id and remaining_packages == 0 and total_packages > 0:
+        # Abre nova sessão para buscar dados atualizados da rota
+        db_notify = SessionLocal()
+        try:
+            route_complete = db_notify.get(Route, route_id)
+            if route_complete and route_complete.status == "completed":
+                notify_text = (
+                    f"🎉 *Rota Completa!*\n\n"
+                    f"📛 {route_complete.name or f'Rota {route_id}'}\n"
+                    f"👤 Motorista: {driver_name}\n"
+                    f"📦 {total_packages} pacotes entregues\n\n"
+                    f"💰 *Resumo Financeiro:*\n"
+                    f"💵 Receita: R$ {route_complete.revenue:.2f}\n"
+                    f"💼 Salário: R$ {route_complete.driver_salary:.2f}\n"
+                    f"📊 Lucro Bruto: R$ {route_complete.revenue - route_complete.driver_salary:.2f}\n\n"
+                    f"💡 Use /rotas para finalizar e adicionar despesas extras."
+                )
+                await notify_managers(notify_text, context)
+        finally:
+            db_notify.close()
     
     # ✅ FASE 2.3: NOTIFICAÇÃO COM DADOS CONSOLIDADOS
     # Mensagem formatada para o canal (sem asteriscos, mais limpo)
@@ -4647,6 +4893,9 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(on_track_view_route, pattern=r"^track_view_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_delete_view_route, pattern=r"^delete_view_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_back_to_routes, pattern=r"^back_to_routes$"))
+    # ✅ FASE 4.3: Handlers para finalização de rota
+    app.add_handler(CallbackQueryHandler(on_finalize_route, pattern=r"^finalize_route:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_finalize_confirm, pattern=r"^finalize_confirm:\d+$"))
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
     app.add_handler(CommandHandler("configurar_canal_analise", cmd_configurar_canal_analise))
     app.add_handler(CommandHandler("meus_registros", cmd_meus_registros))

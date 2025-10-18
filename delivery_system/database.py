@@ -88,11 +88,25 @@ class Route(Base):
         Integer, ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # ✅ FASE 4.1: Campos para automação financeira
+    revenue: Mapped[float] = mapped_column(Float, default=260.0, nullable=False)  # Receita da rota
+    driver_salary: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Salário calculado ao enviar
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)  # pending, in_progress, completed, finalized
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Quando todos pacotes foram entregues
+    finalized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Quando gerente finalizou
+    extra_expenses: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)  # Despesas extras
+    extra_income: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)  # Receitas extras
+    calculated_km: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # KM calculados automaticamente
 
     # relationships
     assigned_to: Mapped[Optional[User]] = relationship(back_populates="assigned_routes")
     packages: Mapped[List["Package"]] = relationship(
         back_populates="route", cascade="all, delete-orphan", passive_deletes=True
+    )
+    
+    __table_args__ = (
+        CheckConstraint("status in ('pending','in_progress','completed','finalized')", name="ck_route_status"),
     )
 
 
@@ -156,8 +170,13 @@ class Expense(Base):
     fuel_type: Mapped[Optional[str]] = mapped_column(String(50))  # gasolina, diesel, etanol (se type=combustivel)
     fuel_liters: Mapped[Optional[float]] = mapped_column(Float)
     employee_name: Mapped[Optional[str]] = mapped_column(String(255))  # se type=salario
+    route_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("route.id", ondelete="SET NULL"), nullable=True)  # ✅ FASE 4.1: Link com rota
+    confirmed: Mapped[bool] = mapped_column(Integer, default=1, nullable=False)  # ✅ FASE 4.1: Se está confirmada (1) ou pendente (0)
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # relationships
+    route: Mapped[Optional[Route]] = relationship()
 
     __table_args__ = (
         CheckConstraint("type in ('combustivel','salario','manutencao','pedagio','combustivel_outro','outro')", name="ck_expense_type"),
