@@ -3,10 +3,9 @@ Aplicação unificada: FastAPI (web) + Telegram Bot (webhook)
 Roda tudo em um único processo, usando plano FREE do Render
 """
 import os
-import asyncio
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Request
+from fastapi import Request
 from telegram import Update
 from telegram.ext import Application
 

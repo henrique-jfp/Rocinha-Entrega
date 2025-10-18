@@ -3,12 +3,12 @@ from dotenv import load_dotenv
 from typing import List, Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict
 
-from database import SessionLocal, get_db_session, Package, Route, init_db, LinkToken
+from database import get_db_session, Package, Route, init_db, LinkToken
 import secrets
 
 

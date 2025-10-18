@@ -26,7 +26,6 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from telegram.error import TelegramError
 
 from database import (
     SessionLocal, init_db, User, Route, Package, DeliveryProof,
@@ -288,6 +287,125 @@ async def notify_managers(text: str, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
+class DeliveryLinkError(Exception):
+    """Raised when a delivery deep link is invalid or cannot be processed."""
+
+    def __init__(self, message: str, parse_mode: str | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.parse_mode = parse_mode
+
+
+def _extract_command_argument(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[str]:
+    """Return the first argument passed to a command, including text fallback."""
+    if context.args:
+        return context.args[0]
+    if update.message and update.message.text:
+        parts = update.message.text.strip().split(maxsplit=1)
+        if len(parts) == 2:
+            return parts[1]
+    return None
+
+
+def _normalize_delivery_argument(raw_arg: str) -> str:
+    """Remove known prefixes from Telegram deep-link arguments."""
+    for prefix in ("entrega_", "iniciar_"):
+        if raw_arg.startswith(prefix):
+            raw_arg = raw_arg[len(prefix):]
+    return raw_arg
+
+
+def _build_delivery_mode_keyboard() -> ReplyKeyboardMarkup:
+    """Keyboard reused when prompting the driver to choose delivery mode."""
+    return ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
+
+
+async def _prompt_delivery_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, package_ids: List[int]) -> int:
+    """Store target package IDs and prompt the driver to choose the flow."""
+    keyboard = _build_delivery_mode_keyboard()
+    if len(package_ids) > 1:
+        context.user_data["deliver_package_ids"] = package_ids
+        context.user_data.pop("deliver_package_id", None)
+        await update.message.reply_text(
+            "📦 *Entrega Múltipla*\n\n"
+            f"🎯 {len(package_ids)} pacotes selecionados\n\n"
+            "Como será esta entrega?",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    else:
+        context.user_data["deliver_package_id"] = package_ids[0]
+        context.user_data.pop("deliver_package_ids", None)
+        await update.message.reply_text(
+            "📦 *Iniciar Entrega*\n\n"
+            "Como será esta entrega?",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+    return MODE_SELECT
+
+
+async def _process_delivery_argument(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_arg: str) -> Optional[int]:
+    """Processa argumentos de deep link e retorna o próximo estado da conversa."""
+    if not raw_arg:
+        return None
+
+    arg = _normalize_delivery_argument(raw_arg.strip())
+    if not arg:
+        return None
+
+    if arg.startswith("deliverg_"):
+        token = arg.split("deliverg_", 1)[1]
+        db = SessionLocal()
+        try:
+            rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
+            if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
+                try:
+                    ids = [int(i) for i in rec.data["ids"]]
+                except Exception as convert_err:
+                    raise DeliveryLinkError(f"❌ Erro ao processar token: {convert_err}", 'Markdown') from convert_err
+                if not ids:
+                    raise DeliveryLinkError(
+                        "❌ *Token Inválido*\n\nEste link de entrega expirou ou é inválido.\n\nUse o mapa interativo para gerar um novo link.",
+                        'Markdown'
+                    )
+                return await _prompt_delivery_mode(update, context, ids)
+        finally:
+            db.close()
+        raise DeliveryLinkError(
+            "❌ *Token Inválido*\n\nEste link de entrega expirou ou é inválido.\n\nUse o mapa interativo para gerar um novo link.",
+            'Markdown'
+        )
+
+    if arg.startswith("deliver_group_"):
+        ids_str = arg.split("deliver_group_", 1)[1]
+        ids = [int(x) for x in ids_str.split("_") if x.isdigit()]
+        if not ids:
+            raise DeliveryLinkError(
+                "❌ *Pacotes Não Encontrados*\n\nO link informado não contém pacotes válidos.",
+                'Markdown'
+            )
+        return await _prompt_delivery_mode(update, context, ids)
+
+    if arg.startswith("iniciar_deliver_"):
+        package_id_str = arg.split("iniciar_deliver_", 1)[1]
+        try:
+            package_id = int(package_id_str)
+        except ValueError as err:
+            raise DeliveryLinkError("❌ *ID Inválido*\n\nO ID do pacote precisa ser numérico.", 'Markdown') from err
+        return await _prompt_delivery_mode(update, context, [package_id])
+
+    if arg.startswith("deliver_"):
+        package_id_str = arg.split("deliver_", 1)[1]
+        try:
+            package_id = int(package_id_str)
+        except ValueError as err:
+            raise DeliveryLinkError("❌ *ID Inválido*\n\nO ID do pacote precisa ser numérico.", 'Markdown') from err
+        return await _prompt_delivery_mode(update, context, [package_id])
+
+    return None
+
+
 # Comandos
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /start - Cadastro inicial e boas-vindas OU inicia entrega via deep link"""
@@ -295,103 +413,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     user = register_manager_if_first(u.id, u.full_name)
 
-    # Verifica se veio do mapa (deep link de entrega)
-    # IMPORTANTE: O Telegram sempre usa /start para deep links, não /entrega
-    # O formato é: t.me/bot?start=PARAMETRO → bot recebe /start PARAMETRO
-    args = context.args or []
-    print(f"DEBUG /start: context.args = {args}")
-    if not args and update.message and update.message.text:
-        # Fallback: extrai parâmetro da mensagem de texto "/start <param>"
-        parts = update.message.text.strip().split(maxsplit=1)
-        print(f"DEBUG /start: update.message.text = '{update.message.text}'")
-        print(f"DEBUG /start: parts = {parts}")
-        if len(parts) == 2:
-            args = [parts[1]]
-            print(f"DEBUG /start: args from message = {args}")
-    
-    if args and len(args) >= 1:
-        arg = args[0]
-        print(f"DEBUG /start: processing arg = '{arg}'")
-        
-        # Remove prefixo "entrega_" se presente (vem do deep link)
-        if arg.startswith("entrega_"):
-            arg = arg[8:]  # Remove "entrega_" prefix
-            print(f"DEBUG /start: removed entrega_ prefix, now arg = '{arg}'")
-        
-        # Formato token curto: deliverg_<token>
-        if arg.startswith("deliverg_"):
-            token = arg.split("deliverg_", 1)[1]
-            print(f"DEBUG /start: deliverg_ token = '{token}'")
-            db = SessionLocal()
-            try:
-                rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
-                print(f"DEBUG /start: LinkToken found = {rec is not None}")
-                if rec:
-                    print(f"DEBUG /start: rec.data = {rec.data}")
-                    print(f"DEBUG /start: rec.type = {rec.type}")
-                if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
-                    context.user_data["deliver_package_ids"] = list(map(int, rec.data["ids"]))
-                    print(f"DEBUG /start: deliver_package_ids set to {context.user_data['deliver_package_ids']}")
-                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                    await update.message.reply_text(
-                        "📦 *Entrega Múltipla*\n\n"
-                        f"🎯 {len(context.user_data['deliver_package_ids'])} pacotes selecionados\n\n"
-                        "Como será esta entrega?",
-                        reply_markup=keyboard,
-                        parse_mode='Markdown'
-                    )
-                    return MODE_SELECT
-                else:
-                    print("DEBUG /start: Token not found or invalid data")
-                    await update.message.reply_text(
-                        "❌ *Token Inválido*\n\n"
-                        "Este link de entrega expirou ou é inválido.\n\n"
-                        "Use o mapa interativo para gerar um novo link.",
-                        parse_mode='Markdown'
-                    )
-                    return ConversationHandler.END
-            finally:
-                db.close()
-        
-        # Formato legado: deliver_group_<id1>_<id2>_...
-        elif arg.startswith("deliver_group_"):
-            try:
-                ids_str = arg.split("deliver_group_", 1)[1]
-                ids = [int(x) for x in ids_str.split("_") if x.isdigit()]
-                if ids:
-                    context.user_data["deliver_package_ids"] = ids
-                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                    await update.message.reply_text(
-                        "📦 *Entrega Múltipla*\n\n"
-                        f"🎯 {len(ids)} pacotes selecionados\n\n"
-                        "Como será esta entrega?",
-                        reply_markup=keyboard,
-                        parse_mode='Markdown'
-                    )
-                    return MODE_SELECT
-            except Exception:
-                pass
-        
-        # Formato único: deliver_<id>
-        elif arg.startswith("deliver_"):
-            try:
-                package_id_str = arg.split("deliver_", 1)[1]
-                package_id = int(package_id_str)
-                context.user_data["deliver_package_id"] = package_id
-                
-                keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                await update.message.reply_text(
-                    "📦 *Iniciar Entrega*\n\n"
-                    "Como será esta entrega?",
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
-                return MODE_SELECT
-            except (ValueError, IndexError):
-                pass
+    arg = _extract_command_argument(update, context)
+    if arg:
+        try:
+            result = await _process_delivery_argument(update, context, arg)
+        except DeliveryLinkError as err:
+            if update.message:
+                await update.message.reply_text(err.message, parse_mode=err.parse_mode)
+            return ConversationHandler.END
+        if result is not None:
+            return result
 
-    # Mensagem de boas-vindas personalizada (sem deep link)
-    print("DEBUG /start: No delivery params, showing welcome message")
+    if not update.message:
+        return ConversationHandler.END
+
     if user.role == "manager":
         await update.message.reply_text(
             f"👋 Olá, *{u.first_name}*!\n\n"
@@ -407,181 +442,63 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     return ConversationHandler.END
+
+
 async def cmd_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /iniciar - Inicia entrega via deep link do mapa"""
-    args = context.args or []
-    if not args and update.message and update.message.text:
-        # Fallback: extrai parâmetro da mensagem de texto "/iniciar <param>"
-        parts = update.message.text.strip().split(maxsplit=1)
-        if len(parts) == 2:
-            args = [parts[1]]
-    
-    if args and len(args) == 1:
-        # Aceita tanto "iniciar_deliver_X" quanto "deliver_X"
-        arg = args[0]
-        if arg.startswith("deliverg_"):
-            token = arg.split("deliverg_", 1)[1]
-            db = SessionLocal()
-            try:
-                rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
-                if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
-                    context.user_data["deliver_package_ids"] = list(map(int, rec.data["ids"]))
-                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                    await update.message.reply_text(
-                        "📦 Como será esta entrega?",
-                        reply_markup=keyboard
-                    )
-                    return MODE_SELECT
-            finally:
-                db.close()
-        if arg.startswith("deliver_group_"):
-            try:
-                ids_str = arg.split("deliver_group_", 1)[1]
-                ids = [int(x) for x in ids_str.split("_") if x.isdigit()]
-                if ids:
-                    context.user_data["deliver_package_ids"] = ids
-                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                    await update.message.reply_text(
-                        "📦 Como será esta entrega?",
-                        reply_markup=keyboard
-                    )
-                    return MODE_SELECT
-            except Exception:
-                pass
-        if arg.startswith("iniciar_deliver_"):
-            package_id_str = arg.split("iniciar_deliver_", 1)[1]
-        elif arg.startswith("deliver_"):
-            package_id_str = arg.split("deliver_", 1)[1]
-        else:
-            package_id_str = None
-            
-        if package_id_str:
-            try:
-                package_id = int(package_id_str)
-                context.user_data["deliver_package_id"] = package_id
-                keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                await update.message.reply_text(
-                    "📦 Como será esta entrega?",
-                    reply_markup=keyboard
-                )
-                return MODE_SELECT
-            except ValueError:
-                pass
-    
-    # Se chamou /iniciar sem parâmetros ou com parâmetro inválido
-    await update.message.reply_text(
-        "⚠️ Comando inválido.\n\n"
-        "Use o botão 'Entregar' no mapa interativo para iniciar uma entrega.",
-        parse_mode='Markdown'
-    )
+    arg = _extract_command_argument(update, context)
+    if not arg:
+        if update.message:
+            await update.message.reply_text(
+                "⚠️ Comando inválido.\n\nUse o botão 'Entregar' no mapa interativo para iniciar uma entrega.",
+                parse_mode='Markdown'
+            )
+        return ConversationHandler.END
+
+    try:
+        result = await _process_delivery_argument(update, context, arg)
+    except DeliveryLinkError as err:
+        if update.message:
+            await update.message.reply_text(err.message, parse_mode=err.parse_mode)
+        return ConversationHandler.END
+
+    if result is not None:
+        return result
+
+    if update.message:
+        await update.message.reply_text(
+            "⚠️ Comando inválido.\n\nUse o botão 'Entregar' no mapa interativo para iniciar uma entrega.",
+            parse_mode='Markdown'
+        )
     return ConversationHandler.END
 
 
 async def cmd_entrega(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /entrega - Inicia fluxo de entrega (grupos ou único pacote)"""
-    args = context.args or []
-    print(f"DEBUG /entrega: context.args = {args}")
-    
-    if not args and update.message and update.message.text:
-        # Fallback: extrai parâmetro da mensagem de texto "/entrega <param>"
-        parts = update.message.text.strip().split(maxsplit=1)
-        print(f"DEBUG /entrega: update.message.text = '{update.message.text}'")
-        print(f"DEBUG /entrega: parts = {parts}")
-        if len(parts) == 2:
-            args = [parts[1]]
-            print(f"DEBUG /entrega: args from message = {args}")
-    
-    if args and len(args) >= 1:
-        arg = args[0]
-        print(f"DEBUG /entrega: processing arg = '{arg}'")
-        
-        # Formato especial do deep link: entrega_deliverg_<token> ou entrega_deliver_<id>
-        # O Telegram adiciona "entrega_" como prefixo quando usa /start com parâmetro
-        if arg.startswith("entrega_"):
-            arg = arg[8:]  # Remove "entrega_" prefix
-            print(f"DEBUG /entrega: removed prefix, now arg = '{arg}'")
-        
-        # Formato token curto: deliverg_<token>
-        if arg.startswith("deliverg_"):
-            token = arg.split("deliverg_", 1)[1]
-            print(f"DEBUG /entrega: deliverg_ token = '{token}'")
-            db = SessionLocal()
-            try:
-                rec = db.query(LinkToken).filter(LinkToken.token == token, LinkToken.type == "deliver_group").first()
-                print(f"DEBUG /entrega: LinkToken found = {rec is not None}")
-                if rec:
-                    print(f"DEBUG /entrega: rec.data = {rec.data}")
-                    print(f"DEBUG /entrega: rec.type = {rec.type}")
-                if rec and isinstance(rec.data, dict) and rec.data.get("ids"):
-                    context.user_data["deliver_package_ids"] = list(map(int, rec.data["ids"]))
-                    print(f"DEBUG /entrega: deliver_package_ids set to {context.user_data['deliver_package_ids']}")
-                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                    await update.message.reply_text(
-                        "📦 *Entrega Múltipla*\n\n"
-                        f"🎯 {len(context.user_data['deliver_package_ids'])} pacotes selecionados\n\n"
-                        "Como será esta entrega?",
-                        reply_markup=keyboard,
-                        parse_mode='Markdown'
-                    )
-                    return MODE_SELECT
-                else:
-                    print("DEBUG /entrega: Token not found or invalid data")
-                    await update.message.reply_text(
-                        "❌ *Token Inválido*\n\n"
-                        "Este link de entrega expirou ou é inválido.\n\n"
-                        "Use o mapa interativo para gerar um novo link.",
-                        parse_mode='Markdown'
-                    )
-                    return ConversationHandler.END
-            finally:
-                db.close()
-        
-        # Formato legado: deliver_group_<id1>_<id2>_...
-        elif arg.startswith("deliver_group_"):
-            try:
-                ids_str = arg.split("deliver_group_", 1)[1]
-                ids = [int(x) for x in ids_str.split("_") if x.isdigit()]
-                if ids:
-                    context.user_data["deliver_package_ids"] = ids
-                    keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                    await update.message.reply_text(
-                        "📦 *Entrega Múltipla*\n\n"
-                        f"🎯 {len(ids)} pacotes selecionados\n\n"
-                        "Como será esta entrega?",
-                        reply_markup=keyboard,
-                        parse_mode='Markdown'
-                    )
-                    return MODE_SELECT
-            except Exception as e:
-                print(f"DEBUG /entrega: Error processing deliver_group_: {e}")
-                pass
-        
-        # Formato único: deliver_<id>
-        elif arg.startswith("deliver_"):
-            try:
-                package_id_str = arg.split("deliver_", 1)[1]
-                package_id = int(package_id_str)
-                context.user_data["deliver_package_id"] = package_id
-                keyboard = ReplyKeyboardMarkup([["Unitário", "Em massa"]], resize_keyboard=True, one_time_keyboard=True)
-                await update.message.reply_text(
-                    "📦 *Iniciar Entrega*\n\n"
-                    "Como será esta entrega?",
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
-                return MODE_SELECT
-            except (ValueError, IndexError) as e:
-                print(f"DEBUG /entrega: Error processing deliver_: {e}")
-                pass
-    
-    # Se chamou /entrega sem parâmetros ou com parâmetro inválido
-    print("DEBUG /entrega: No valid args, showing error")
-    await update.message.reply_text(
-        "⚠️ *Comando Incorreto*\n\n"
-        "Use o botão *'Entregar'* no mapa interativo para iniciar uma entrega.\n\n"
-        "💡 Este comando é usado automaticamente quando você clica nos botões de entrega.",
-        parse_mode='Markdown'
-    )
+    arg = _extract_command_argument(update, context)
+    if not arg:
+        if update.message:
+            await update.message.reply_text(
+                "⚠️ *Comando Incorreto*\n\nUse o botão *'Entregar'* no mapa interativo para iniciar uma entrega.\n\n💡 Este comando é usado automaticamente quando você clica nos botões de entrega.",
+                parse_mode='Markdown'
+            )
+        return ConversationHandler.END
+
+    try:
+        result = await _process_delivery_argument(update, context, arg)
+    except DeliveryLinkError as err:
+        if update.message:
+            await update.message.reply_text(err.message, parse_mode=err.parse_mode)
+        return ConversationHandler.END
+
+    if result is not None:
+        return result
+
+    if update.message:
+        await update.message.reply_text(
+            "⚠️ *Comando Incorreto*\n\nUse o botão *'Entregar'* no mapa interativo para iniciar uma entrega.\n\n💡 Este comando é usado automaticamente quando você clica nos botões de entrega.",
+            parse_mode='Markdown'
+        )
     return ConversationHandler.END
 
 
@@ -2282,68 +2199,6 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def on_delete_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Callback para excluir rota"""
-    query = update.callback_query
-    await query.answer()
-    
-    data = query.data or ""
-    if not data.startswith("delete_route:"):
-        return
-    
-    route_id = int(data.split(":", 1)[1])
-    
-    db = SessionLocal()
-    try:
-        # Verifica permissão
-        me = get_user_by_tid(db, update.effective_user.id)
-        if not me or me.role != "manager":
-            await query.answer("⛔ Apenas gerentes podem excluir rotas!", show_alert=True)
-            return
-        
-        # Busca rota
-        route = db.get(Route, route_id)
-        if not route:
-            await query.answer("❌ Rota não encontrada!", show_alert=True)
-            return
-        
-        route_name = route.name or f"Rota {route.id}"
-        
-        # Conta pacotes e comprovantes
-        package_count = db.query(Package).filter(Package.route_id == route_id).count()
-        proof_count = db.query(DeliveryProof).join(Package).filter(Package.route_id == route_id).count()
-        
-        # Deleta comprovantes associados primeiro
-        if proof_count > 0:
-            db.query(DeliveryProof).filter(
-                DeliveryProof.package_id.in_(
-                    db.query(Package.id).filter(Package.route_id == route_id)
-                )
-            ).delete(synchronize_session=False)
-        
-        # Deleta pacotes
-        db.query(Package).filter(Package.route_id == route_id).delete()
-        
-        # Deleta rota
-        db.delete(route)
-        db.commit()
-        
-        await query.edit_message_text(
-            f"✅ *Rota Excluída!*\n\n"
-            f"📦 {route_name}\n"
-            f"🗑️ Foram removidos:\n"
-            f"• {package_count} pacote(s)\n"
-            f"• {proof_count} comprovante(s)\n\n"
-            f"Use /importar para criar novas rotas.",
-            parse_mode='Markdown'
-        )
-        
-    except Exception as e:
-        await query.answer(f"❌ Erro ao excluir: {str(e)}", show_alert=True)
-    finally:
-        db.close()
-
-
 async def cmd_importar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     try:
@@ -3273,17 +3128,6 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
     context.user_data.clear()
-    return ConversationHandler.END
-
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text(
-        "🚫 *Operação Cancelada*\n\n"
-        "Nenhuma alteração foi salva.",
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode='Markdown'
-    )
     return ConversationHandler.END
 
 
@@ -4407,7 +4251,6 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(on_select_route, pattern=r"^sel_route:\d+$"))
     app.add_handler(CallbackQueryHandler(on_select_driver, pattern=r"^sel_driver:\d+$"))
     app.add_handler(CallbackQueryHandler(on_delete_driver, pattern=r"^delete_driver:\d+$"))
-    app.add_handler(CallbackQueryHandler(on_delete_route, pattern=r"^delete_route:\d+$"))
 
     delivery_conv = ConversationHandler(
         entry_points=[
