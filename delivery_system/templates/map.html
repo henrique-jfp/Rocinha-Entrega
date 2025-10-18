@@ -4,35 +4,55 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#6366f1" />
-  <title>Mapa da Rota</title>
+  <meta name="theme-color" content="#0f172a" />
+  <title>🗺️ Mapa da Rota</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css?v=6" />
 </head>
 <body data-route-id="{{ route_id }}" data-driver-id="{{ driver_id }}" data-bot-username="{{ bot_username }}" data-base-url="{{ base_url }}">
+  <!-- Header Glassmorphism -->
   <div id="header">
-    <h1>📍 Mapa da Rota</h1>
-    <div id="counter">Carregando pacotes...</div>
+    <div class="header-content">
+      <div class="header-title">
+        <span class="emoji-icon">�️</span>
+        <h1>Mapa da Rota</h1>
+      </div>
+      <div id="counter" class="loading-pulse">Carregando pacotes...</div>
+    </div>
   </div>
+
   <div id="layout">
+    <!-- Mapa com overlay gradient -->
     <div id="map-container">
       <div id="map"></div>
-      <!-- Botão toggle sidebar -->
-      <button id="toggle-sidebar" class="toggle-btn" title="Mostrar/Ocultar Lista">
-        📋
+      
+      <!-- Botão toggle com animação -->
+      <button id="toggle-sidebar" class="toggle-btn floating-btn" title="Mostrar/Ocultar Lista">
+        <span class="btn-icon">📋</span>
+        <span class="btn-ripple"></span>
       </button>
     </div>
-    <div id="sidebar">
-      <!-- Barra de busca -->
-      <div id="search-bar">
-        <input type="text" id="search-input" placeholder="🔍 Buscar por endereço ou código..." />
-        <button id="clear-search" style="display: none;">✕</button>
+
+    <!-- Sidebar moderna -->
+    <div id="sidebar" class="sidebar-modern">
+      <!-- Barra de busca com ícone animado -->
+      <div id="search-bar" class="search-modern">
+        <div class="search-icon">🔍</div>
+        <input type="text" id="search-input" placeholder="Buscar endereço ou código..." />
+        <button id="clear-search" class="clear-btn" style="display: none;">
+          <span>✕</span>
+        </button>
       </div>
-      <ul id="package-list"></ul>
+      
+      <!-- Lista com scroll suave -->
+      <ul id="package-list" class="package-list-modern"></ul>
     </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="/static/js/map.js?v=5"></script>
+  <script src="/static/js/map.js?v=6"></script>
 </body>
 </html>
