@@ -484,7 +484,11 @@
 
   // Adiciona marcador individual
   function addPackageMarker(pkg, index){
-    if(!(pkg.latitude && pkg.longitude)) return null;
+    // Validação robusta de coordenadas
+    if(!pkg.latitude || !pkg.longitude) return null;
+    if(!isFinite(pkg.latitude) || !isFinite(pkg.longitude)) return null;
+    if(Math.abs(pkg.latitude) > 90 || Math.abs(pkg.longitude) > 180) return null;
+    
     const icon = createNumberedIcon(index + 1, pkg.status, false, pkg.areaColor);
     const marker = L.marker([pkg.latitude, pkg.longitude], { icon }).addTo(markersLayer);
     marker.bindPopup(createPopupHtml(pkg));
@@ -496,6 +500,11 @@
   function addClusterMarker(cluster, clusterIndex){
     const packages = cluster.packages;
     const count = packages.length;
+    
+    // Validação de coordenadas do cluster
+    if(!cluster.lat || !cluster.lng) return null;
+    if(!isFinite(cluster.lat) || !isFinite(cluster.lng)) return null;
+    if(Math.abs(cluster.lat) > 90 || Math.abs(cluster.lng) > 180) return null;
     
     // Determina status dominante do cluster
     const statuses = packages.map(p => p.status);
@@ -783,13 +792,23 @@
           // Parada com 1 pacote
           const pkg = cluster.packages[0];
           const marker = addPackageMarker(pkg, displayIndex);
-          if(marker) group.push(marker.getLatLng());
+          if(marker){
+            const latLng = marker.getLatLng();
+            if(latLng && isFinite(latLng.lat) && isFinite(latLng.lng)){
+              group.push(latLng);
+            }
+          }
           list.appendChild(createListItem(pkg, marker, displayIndex));
           displayIndex++;
         } else {
           // Parada com múltiplos pacotes no mesmo endereço
           const marker = addClusterMarker(cluster, displayIndex);
-          if(marker) group.push(marker.getLatLng());
+          if(marker){
+            const latLng = marker.getLatLng();
+            if(latLng && isFinite(latLng.lat) && isFinite(latLng.lng)){
+              group.push(latLng);
+            }
+          }
           // Todos os itens listados recebem o mesmo número de parada
           cluster.packages.forEach((pkg) => {
             list.appendChild(createListItem(pkg, marker, displayIndex));
