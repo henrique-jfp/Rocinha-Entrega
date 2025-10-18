@@ -78,6 +78,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 # Estados de conversa
 IMPORT_ASK_NAME = 9
 IMPORT_WAITING_FILE = 10
+IMPORT_CONFIRMING = 11  # ✅ FASE 3.2: Novo estado para confirmação de importação
 PHOTO1, PHOTO2, NAME, DOC, NOTES = range(5)
 # Novo fluxo: seleção de modo e fotos em massa
 MODE_SELECT, MASS_PHOTOS = range(50, 52)
@@ -224,7 +225,32 @@ def _find_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
     return None
 
 
-def parse_import_dataframe(df: pd.DataFrame) -> list[dict]:
+def parse_import_dataframe(df: pd.DataFrame) -> tuple[list[dict], dict]:
+    """
+    Parse DataFrame de importação e retorna items + relatório de detecção.
+    
+    Returns:
+        tuple: (items, detection_report)
+        
+        detection_report = {
+            'columns_found': {'tracking': 'SPX TN', 'address': 'Destination Address', ...},
+            'columns_missing': ['phone', 'neighborhood'],
+            'rows_total': 150,
+            'rows_valid': 145,
+            'rows_skipped': 5,
+            'warnings': ['Linha 23: Coordenada inválida', ...]
+        }
+    """
+    # ✅ FASE 3.1: RELATÓRIO DE DETECÇÃO
+    report = {
+        'columns_found': {},
+        'columns_missing': [],
+        'rows_total': len(df),
+        'rows_valid': 0,
+        'rows_skipped': 0,
+        'warnings': []
+    }
+    
     col_tracking = _find_column(
         df,
         [
@@ -238,52 +264,95 @@ def parse_import_dataframe(df: pd.DataFrame) -> list[dict]:
             "tracking id",
         ],
     ) or df.columns[0]
+    
     col_address = _find_column(df, ["destination address", "address", "endereco", "endereço", "destino"]) or df.columns[1]
     col_lat = _find_column(df, ["latitude", "lat"])  # opcional
     col_lng = _find_column(df, ["longitude", "lng", "long"])  # opcional
     col_bairro = _find_column(df, ["bairro", "neighborhood"])  # opcional
 
-    items: list[dict] = []
-    for _, row in df.iterrows():
-        tracking_code = str(row.get(col_tracking, "")).strip()
-        if not tracking_code:
-            continue
-        address = str(row.get(col_address, "")).strip() or None
-        neighborhood = None
-        if col_bairro:
-            neighborhood = str(row.get(col_bairro, "")).strip() or None
-        lat = None
-        lng = None
-        if col_lat and pd.notna(row.get(col_lat)):
-            try:
-                lat = float(row[col_lat])
-            except (ValueError, TypeError) as e:
-                logger.warning(
-                    f"Não foi possível converter latitude: {row.get(col_lat)}",
-                    extra={"tracking_code": tracking_code, "error": str(e)}
-                )
-                lat = None
-        if col_lng and pd.notna(row.get(col_lng)):
-            try:
-                lng = float(row[col_lng])
-            except (ValueError, TypeError) as e:
-                logger.warning(
-                    f"Não foi possível converter longitude: {row.get(col_lng)}",
-                    extra={"tracking_code": tracking_code, "error": str(e)}
-                )
-                lng = None
+    # Registra colunas encontradas
+    report['columns_found']['tracking'] = col_tracking
+    if col_address:
+        report['columns_found']['address'] = col_address
+    else:
+        report['columns_missing'].append('address')
+    
+    if col_lat:
+        report['columns_found']['latitude'] = col_lat
+    else:
+        report['columns_missing'].append('latitude')
+    
+    if col_lng:
+        report['columns_found']['longitude'] = col_lng
+    else:
+        report['columns_missing'].append('longitude')
+    
+    if col_bairro:
+        report['columns_found']['neighborhood'] = col_bairro
+    else:
+        report['columns_missing'].append('neighborhood')
 
-        items.append(
-            {
-                "tracking_code": tracking_code,
-                "address": address,
-                "neighborhood": neighborhood,
-                "latitude": lat,
-                "longitude": lng,
-                "raw_data": row.to_dict(),
-            }
-        )
-    return items
+    items: list[dict] = []
+    for idx, row in df.iterrows():
+        try:
+            tracking_code = str(row.get(col_tracking, "")).strip()
+            if not tracking_code:
+                report['rows_skipped'] += 1
+                report['warnings'].append(f"Linha {idx+2}: Código de rastreio vazio")
+                continue
+                
+            address = str(row.get(col_address, "")).strip() or None
+            neighborhood = None
+            if col_bairro:
+                neighborhood = str(row.get(col_bairro, "")).strip() or None
+            lat = None
+            lng = None
+            if col_lat and pd.notna(row.get(col_lat)):
+                try:
+                    lat = float(row[col_lat])
+                    # ✅ FASE 3.1: VALIDA COORDENADAS
+                    if lat < -90 or lat > 90:
+                        report['warnings'].append(f"Linha {idx+2}: Latitude inválida ({lat}) - código: {tracking_code}")
+                        lat = None
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Não foi possível converter latitude: {row.get(col_lat)}",
+                        extra={"tracking_code": tracking_code, "error": str(e)}
+                    )
+                    report['warnings'].append(f"Linha {idx+2}: Latitude não numérica - código: {tracking_code}")
+                    lat = None
+            if col_lng and pd.notna(row.get(col_lng)):
+                try:
+                    lng = float(row[col_lng])
+                    # ✅ FASE 3.1: VALIDA COORDENADAS
+                    if lng < -180 or lng > 180:
+                        report['warnings'].append(f"Linha {idx+2}: Longitude inválida ({lng}) - código: {tracking_code}")
+                        lng = None
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Não foi possível converter longitude: {row.get(col_lng)}",
+                        extra={"tracking_code": tracking_code, "error": str(e)}
+                    )
+                    report['warnings'].append(f"Linha {idx+2}: Longitude não numérica - código: {tracking_code}")
+                    lng = None
+
+            items.append(
+                {
+                    "tracking_code": tracking_code,
+                    "address": address,
+                    "neighborhood": neighborhood,
+                    "latitude": lat,
+                    "longitude": lng,
+                    "raw_data": row.to_dict(),
+                }
+            )
+            report['rows_valid'] += 1
+            
+        except Exception as e:
+            report['rows_skipped'] += 1
+            report['warnings'].append(f"Linha {idx+2}: Erro ao processar - {str(e)}")
+    
+    return items, report
 
 
 def get_user_by_tid(db, tid: int) -> Optional[User]:
@@ -2426,17 +2495,24 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return IMPORT_WAITING_FILE
 
+    # ✅ FASE 3.2: FEEDBACK IMEDIATO
     await update.message.chat.send_action(action=ChatAction.UPLOAD_DOCUMENT)
-    await update.message.reply_text("⏳ Processando arquivo...", parse_mode='Markdown')
+    processing_msg = await update.message.reply_text(
+        "⏳ *Processando arquivo...*\n\n"
+        "📥 Baixando e analisando dados...",
+        parse_mode='Markdown'
+    )
     
     file = await doc.get_file()
     local_path = IMPORTS_DIR / filename
     await file.download_to_drive(local_path)
 
+    # ✅ FASE 3.2: PARSE COM RELATÓRIO
     df = pd.read_excel(local_path) if suffix == ".xlsx" else pd.read_csv(local_path)
-    items = parse_import_dataframe(df)
+    items, report = parse_import_dataframe(df)
+    
     if not items:
-        await update.message.reply_text(
+        await processing_msg.edit_text(
             "❌ *Erro ao Processar*\n\n"
             "Não encontrei dados válidos no arquivo.\n\n"
             "Verifique se o arquivo possui:\n"
@@ -2446,6 +2522,141 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return ConversationHandler.END
 
+    # ✅ FASE 3.2: PREVIEW COM ESTATÍSTICAS
+    # Calcula estatísticas
+    with_coords = sum(1 for i in items if i.get('latitude') and i.get('longitude'))
+    with_address = sum(1 for i in items if i.get('address'))
+    with_neighborhood = sum(1 for i in items if i.get('neighborhood'))
+    
+    # Monta mensagem de preview
+    preview_text = (
+        f"📊 *Análise da Planilha*\n\n"
+        f"📁 Arquivo: `{filename}`\n\n"
+        f"*Colunas Detectadas:*\n"
+    )
+    
+    # Mostra colunas encontradas com emojis
+    emoji_map = {
+        'tracking': '📦',
+        'address': '🏠',
+        'neighborhood': '🗺️',
+        'latitude': '📍',
+        'longitude': '📍'
+    }
+    
+    for field, col_name in report['columns_found'].items():
+        emoji = emoji_map.get(field, '•')
+        preview_text += f"{emoji} {field}: `{col_name}`\n"
+    
+    if report['columns_missing']:
+        preview_text += f"\n⚠️ *Não Encontradas:* {', '.join(report['columns_missing'])}\n"
+    
+    preview_text += (
+        f"\n📊 *Estatísticas:*\n"
+        f"📦 Total de Pacotes: *{len(items)}*\n"
+        f"✅ Válidos: {report['rows_valid']}\n"
+    )
+    
+    if report['rows_skipped'] > 0:
+        preview_text += f"❌ Ignorados: {report['rows_skipped']}\n"
+    
+    # Estatísticas de dados
+    coord_percent = (with_coords / len(items) * 100) if items else 0
+    addr_percent = (with_address / len(items) * 100) if items else 0
+    
+    preview_text += (
+        f"\n*Qualidade dos Dados:*\n"
+        f"📍 Com Coordenadas: {with_coords} ({coord_percent:.0f}%)\n"
+        f"🏠 Com Endereço: {with_address} ({addr_percent:.0f}%)\n"
+        f"🗺️ Com Bairro: {with_neighborhood} ({with_neighborhood/len(items)*100:.0f}%)\n"
+    )
+    
+    # ✅ FASE 3.3: AVISOS SOBRE QUALIDADE
+    if coord_percent < 50:
+        preview_text += (
+            f"\n⚠️ *Atenção:* Menos de 50% dos pacotes têm coordenadas.\n"
+            f"Isso dificultará a otimização da rota.\n"
+        )
+    
+    if addr_percent < 80:
+        preview_text += (
+            f"\n⚠️ *Atenção:* {100-addr_percent:.0f}% dos pacotes não têm endereço completo.\n"
+        )
+    
+    # Mostra primeiros pacotes como exemplo
+    preview_text += f"\n🔍 *Primeiros Pacotes (exemplo):*\n"
+    for i, item in enumerate(items[:3], 1):
+        has_coord = "✅" if (item.get('latitude') and item.get('longitude')) else "❌"
+        preview_text += (
+            f"\n{i}. `{item['tracking_code']}`\n"
+            f"   🏠 {item.get('address', '❌ Sem endereço')[:30]}...\n"
+            f"   📍 Coordenadas: {has_coord}\n"
+        )
+    
+    if len(report['warnings']) > 0:
+        preview_text += f"\n⚠️ {len(report['warnings'])} avisos detectados\n"
+        if len(report['warnings']) <= 5:
+            preview_text += "\n*Avisos:*\n"
+            for warning in report['warnings'][:5]:
+                preview_text += f"• {warning}\n"
+        else:
+            preview_text += f"_(Mostrando primeiros 5 de {len(report['warnings'])})_\n"
+            for warning in report['warnings'][:5]:
+                preview_text += f"• {warning}\n"
+    
+    preview_text += f"\n💡 Deseja importar esses {len(items)} pacotes?"
+    
+    # ✅ FASE 3.2: BOTÕES DE CONFIRMAÇÃO
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Sim, Importar", callback_data=f"import_confirm"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="import_cancel")
+        ]
+    ]
+    
+    await processing_msg.edit_text(
+        preview_text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+    
+    # Salva dados no context para usar no callback
+    context.user_data['pending_import'] = {
+        'items': items,
+        'report': report,
+        'filename': filename
+    }
+    
+    return IMPORT_CONFIRMING  # Novo estado
+
+
+# ✅ FASE 3.2: CALLBACKS PARA CONFIRMAÇÃO DE IMPORTAÇÃO
+async def on_import_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para confirmar importação após preview"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Recupera dados do context
+    pending = context.user_data.get('pending_import')
+    if not pending:
+        await query.edit_message_text(
+            "❌ *Sessão Expirada*\n\n"
+            "Os dados da importação não estão mais disponíveis.\n"
+            "Use /importar novamente.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
+    items = pending['items']
+    report = pending['report']
+    
+    # Atualiza mensagem para mostrar progresso
+    await query.edit_message_text(
+        "⏳ *Importando Pacotes...*\n\n"
+        f"📦 Salvando {len(items)} pacotes no banco de dados...",
+        parse_mode='Markdown'
+    )
+    
     db = SessionLocal()
     try:
         # Pega o nome da rota do contexto (salvo em handle_route_name)
@@ -2454,8 +2665,10 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         db.add(route)
         db.flush()
         
+        # Adiciona pacotes em batch para melhor performance
+        packages = []
         for it in items:
-            db.add(
+            packages.append(
                 Package(
                     route_id=route.id,
                     tracking_code=it["tracking_code"],
@@ -2467,27 +2680,79 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     raw_data=it.get("raw_data"),
                 )
             )
+        
+        db.add_all(packages)
         db.commit()
         
-        # NOTA: A otimização agora é feita no /enviarrota, após selecionar o motorista
-        await update.message.reply_text(
-            f"✅ *Pacotes Importados!*\n\n"
+        # ✅ FASE 3.3: MENSAGEM FINAL COM RESUMO COMPLETO
+        success_text = (
+            f"✅ *Pacotes Importados com Sucesso!*\n\n"
             f"🆔 ID da Rota: `{route.id}`\n"
+            f"📛 Nome: {route_name}\n"
             f"📦 Total de Pacotes: *{len(items)}*\n\n"
-            f"💡 *A rota será otimizada quando você atribuir a um motorista*\n"
-            f"_(Use /enviarrota)_",
+        )
+        
+        # Adiciona estatísticas de qualidade
+        with_coords = sum(1 for i in items if i.get('latitude') and i.get('longitude'))
+        with_address = sum(1 for i in items if i.get('address'))
+        
+        success_text += (
+            f"*Qualidade dos Dados:*\n"
+            f"📍 Com Coordenadas: {with_coords}/{len(items)} ({with_coords/len(items)*100:.0f}%)\n"
+            f"🏠 Com Endereço: {with_address}/{len(items)} ({with_address/len(items)*100:.0f}%)\n\n"
+        )
+        
+        if report['rows_skipped'] > 0:
+            success_text += f"⚠️ {report['rows_skipped']} linha(s) foram ignoradas\n\n"
+        
+        success_text += (
+            f"💡 *Próximos Passos:*\n"
+            f"1. Use /enviarrota para atribuir a um motorista\n"
+            f"2. A rota será otimizada automaticamente\n"
+            f"3. O motorista receberá o mapa interativo"
+        )
+        
+        await query.edit_message_text(
+            success_text,
             parse_mode='Markdown'
         )
+        
+        # Limpa dados do context
+        context.user_data.pop('pending_import', None)
+        context.user_data.pop('route_name', None)
+        
         return ConversationHandler.END
         
     except Exception as e:
         db.rollback()
-        await update.message.reply_text(f"❌ Erro ao importar: {str(e)}")
+        logger.error(f"Erro ao importar pacotes: {str(e)}", exc_info=True)
+        await query.edit_message_text(
+            f"❌ *Erro ao Importar*\n\n"
+            f"Detalhes: {str(e)}\n\n"
+            f"💡 Tente novamente com /importar",
+            parse_mode='Markdown'
+        )
         return ConversationHandler.END
     finally:
         db.close()
 
 
+async def on_import_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback para cancelar importação"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Limpa dados do context
+    context.user_data.pop('pending_import', None)
+    
+    await query.edit_message_text(
+        "❌ *Importação Cancelada*\n\n"
+        "Nenhum pacote foi importado.\n\n"
+        "💡 Use /importar para tentar novamente.",
+        parse_mode='Markdown'
+    )
+    
+    return ConversationHandler.END
 
 
 async def on_delete_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4400,6 +4665,10 @@ def setup_bot_handlers(app: Application):
         states={
             IMPORT_ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_route_name)],
             IMPORT_WAITING_FILE: [MessageHandler(filters.Document.ALL, handle_import_file)],
+            IMPORT_CONFIRMING: [
+                CallbackQueryHandler(on_import_confirm, pattern="^import_confirm$"),
+                CallbackQueryHandler(on_import_cancel, pattern="^import_cancel$")
+            ],
         },
         fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
         name="import_conv",
