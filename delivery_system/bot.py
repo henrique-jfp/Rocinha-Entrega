@@ -1052,6 +1052,84 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         net_profit = total_revenue - total_spent
         profit_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else 0
         
+        # ✅ FASE 6: Busca dados do mês anterior para comparação (40%)
+        await processing_msg.edit_text(
+            "📊 *Gerando Relatório*\n\n"
+            "🔄 [▓▓▓▓▓░░░░░] 40% - Comparando com mês anterior...",
+            parse_mode='Markdown'
+        )
+        
+        # Calcula início do mês anterior
+        if now.month == 1:
+            prev_month_start = now.replace(year=now.year-1, month=12, day=1, hour=0, minute=0, second=0, microsecond=0)
+            prev_month_end = month_start
+        else:
+            prev_month_start = now.replace(month=now.month-1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            prev_month_end = month_start
+        
+        # Query para mês anterior (mesma estrutura)
+        prev_stats = db.execute(text("""
+            WITH package_stats AS (
+                SELECT 
+                    COUNT(*) as total_packages,
+                    SUM(CASE WHEN p.status = 'delivered' THEN 1 ELSE 0 END) as delivered_packages
+                FROM package p
+                JOIN route r ON p.route_id = r.id
+                WHERE r.created_at >= :prev_start AND r.created_at < :prev_end
+            ),
+            route_stats AS (
+                SELECT COUNT(*) as total_routes
+                FROM route
+                WHERE created_at >= :prev_start AND created_at < :prev_end
+            ),
+            finance_stats AS (
+                SELECT 
+                    (SELECT COALESCE(SUM(amount), 0) FROM income WHERE date >= :prev_date_start AND date < :prev_date_end) as total_revenue,
+                    (SELECT COALESCE(SUM(amount), 0) FROM expense WHERE date >= :prev_date_start AND date < :prev_date_end) as total_spent
+            )
+            SELECT 
+                ps.total_packages,
+                ps.delivered_packages,
+                rs.total_routes,
+                fs.total_revenue,
+                fs.total_spent
+            FROM package_stats ps, route_stats rs, finance_stats fs
+        """), {
+            "prev_start": prev_month_start,
+            "prev_end": prev_month_end,
+            "prev_date_start": prev_month_start.date(),
+            "prev_date_end": prev_month_end.date()
+        }).first()
+        
+        # Extrai dados do mês anterior
+        prev_packages = prev_stats[0] or 0
+        prev_delivered = prev_stats[1] or 0
+        prev_routes = prev_stats[2] or 0
+        prev_revenue = float(prev_stats[3] or 0)
+        prev_spent = float(prev_stats[4] or 0)
+        prev_profit = prev_revenue - prev_spent
+        
+        # Calcula variações percentuais
+        def calc_variation(current, previous):
+            if previous == 0:
+                return "+100%" if current > 0 else "0%"
+            variation = ((current - previous) / previous) * 100
+            return f"{variation:+.1f}%"
+        
+        variation_packages = calc_variation(total_packages, prev_packages)
+        variation_revenue = calc_variation(total_revenue, prev_revenue)
+        variation_profit = calc_variation(net_profit, prev_profit)
+        variation_routes = calc_variation(total_routes, prev_routes)
+        
+        # Monta texto de comparação
+        comparison_text = f"""
+📊 COMPARAÇÃO COM MÊS ANTERIOR:
+• Pacotes: {total_packages} vs {prev_packages} ({variation_packages})
+• Rotas: {total_routes} vs {prev_routes} ({variation_routes})
+• Receita: R$ {total_revenue:,.2f} vs R$ {prev_revenue:,.2f} ({variation_revenue})
+• Lucro: R$ {net_profit:,.2f} vs R$ {prev_profit:,.2f} ({variation_profit})
+"""
+        
         # ETAPA 4: Calcula dados por motorista (65%)
         await processing_msg.edit_text(
             "📊 *Gerando Relatório*\n\n"
@@ -1115,6 +1193,8 @@ DADOS OPERACIONAIS - {now.strftime('%B de %Y')}
 • LUCRO LÍQUIDO: R$ {net_profit:,.2f}
 • MARGEM DE LUCRO: {profit_margin:.1f}%
 
+{comparison_text}
+
 📊 DETALHAMENTO POR MOTORISTA:
 {chr(10).join([f"  {d['name']}: {d['routes']} rota(s), {d['delivered']}/{d['packages']} entregas ({d['success_rate']:.1f}% sucesso)" for d in drivers_data])}
 
@@ -1125,10 +1205,11 @@ INSTRUÇÕES CRÍTICAS PARA O RELATÓRIO:
 ✅ OBRIGATORIAMENTE incluir:
 1. SUMÁRIO EXECUTIVO: 1-2 parágrafos, linguagem clara, sem jargão
 2. ANÁLISE FINANCEIRA COM NÚMEROS: Quanto faturou? Quanto gastou? Lucro real?
-3. ANÁLISE POR MOTORISTA: Performance, eficiência, ROI (retorno do investimento)
-4. VIABILIDADE ECONÔMICA: Vale expandir? Contratar mais motoristas? Com base em números reais
-5. COMBUSTÍVEL & CUSTOS OPERACIONAIS: Consumo, projeção, economy per delivery
-6. RECOMENDAÇÕES CONCRETAS: 3-5 ações específicas com números
+3. **COMPARAÇÃO TEMPORAL**: Analise as variações vs mês anterior - crescimento ou queda?
+4. ANÁLISE POR MOTORISTA: Performance, eficiência, ROI (retorno do investimento)
+5. VIABILIDADE ECONÔMICA: Vale expandir? Contratar mais motoristas? Com base em números reais
+6. COMBUSTÍVEL & CUSTOS OPERACIONAIS: Consumo, projeção, economy per delivery
+7. RECOMENDAÇÕES CONCRETAS: 3-5 ações específicas com números
 
 ✅ FORMATAÇÃO:
 • Use títulos com emojis mas SEM exagero
