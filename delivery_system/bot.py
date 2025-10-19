@@ -3812,12 +3812,17 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception:
                 df = pd.read_csv(local_path, encoding="latin-1", sep=",")
     except Exception as read_err:
-        await processing_msg.edit_text(
-            "❌ *Erro ao Ler Arquivo*\n\n"
-            "Não consegui abrir a planilha. Verifique o formato/codificação e tente novamente.\n\n"
-            f"Detalhes: `{str(read_err)[:200]}`",
-            parse_mode='Markdown'
-        )
+        try:
+            await processing_msg.edit_text(
+                "❌ *Erro ao Ler Arquivo*\n\n"
+                "Não consegui abrir a planilha. Verifique o formato/codificação e tente novamente.\n\n"
+                f"Detalhes: `{str(read_err)[:200]}`",
+                parse_mode='Markdown'
+            )
+        except Exception:
+            await processing_msg.edit_text(
+                "Erro ao ler arquivo. Detalhes: " + str(read_err)[:200]
+            )
         return ConversationHandler.END
     items, report = parse_import_dataframe(df)
     
@@ -3843,7 +3848,7 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     preview_text = (
         f"📊 *Análise da Planilha*\n\n"
         f"📁 Arquivo: `{filename}`\n"
-        f"📛 Rota: *{route_name}*\n\n"
+        f"📛 Rota: `{route_name}`\n\n"
         f"*Colunas Detectadas:*\n"
     )
     
@@ -3862,7 +3867,7 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         preview_text += f"{emoji} {field}: `{col_name}`\n"
     
     if report['columns_missing']:
-        preview_text += f"\n⚠️ *Não Encontradas:* {', '.join(report['columns_missing'])}\n"
+        preview_text += f"\n⚠️ *Não Encontradas:* `{', '.join(report['columns_missing'])}`\n"
     
     preview_text += (
         f"\n📊 *Estatísticas:*\n"
@@ -3900,9 +3905,12 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     preview_text += f"\n🔍 *Primeiros Pacotes (exemplo):*\n"
     for i, item in enumerate(items[:3], 1):
         has_coord = "✅" if (item.get('latitude') and item.get('longitude')) else "❌"
+        addr_text = item.get('address', '❌ Sem endereço')
+        if addr_text is None:
+            addr_text = '❌ Sem endereço'
         preview_text += (
             f"\n{i}. `{item['tracking_code']}`\n"
-            f"   🏠 {item.get('address', '❌ Sem endereço')[:30]}...\n"
+            f"   🏠 `{addr_text[:30]}...`\n"
             f"   📍 Coordenadas: {has_coord}\n"
         )
     
@@ -3911,11 +3919,11 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if len(report['warnings']) <= 5:
             preview_text += "\n*Avisos:*\n"
             for warning in report['warnings'][:5]:
-                preview_text += f"• {warning}\n"
+                preview_text += f"• `{warning}`\n"
         else:
             preview_text += f"_(Mostrando primeiros 5 de {len(report['warnings'])})_\n"
             for warning in report['warnings'][:5]:
-                preview_text += f"• {warning}\n"
+                preview_text += f"• `{warning}`\n"
     
     preview_text += f"\n💡 Deseja importar esses {len(items)} pacotes?"
     
@@ -3927,11 +3935,19 @@ async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]
     ]
     
-    await processing_msg.edit_text(
-        preview_text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='Markdown'
-    )
+    try:
+        await processing_msg.edit_text(
+            preview_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        # Fallback caso alguma entidade quebre o Markdown
+        safe_text = preview_text.replace("*", "").replace("_", "").replace("`", "")
+        await processing_msg.edit_text(
+            safe_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     
     # Salva dados no context para usar no callback
     context.user_data['pending_import'] = {
@@ -4016,11 +4032,11 @@ async def on_import_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # ✅ FASE 4.1: MENSAGEM FINAL COM RECEITA AUTOMÁTICA
         success_text = (
-            f"✅ *Pacotes Importados com Sucesso!*\n\n"
-            f"🆔 ID da Rota: `{route.id}`\n"
-            f"📛 Nome: {route_name}\n"
-            f"📦 Total de Pacotes: *{len(items)}*\n"
-            f"💰 Receita: R$ {route.revenue:.2f} _(registrada automaticamente)_\n\n"
+            f"✅ Pacotes Importados com Sucesso!\n\n"
+            f"ID da Rota: {route.id}\n"
+            f"Nome: {route_name}\n"
+            f"Total de Pacotes: {len(items)}\n"
+            f"Receita: R$ {route.revenue:.2f} (registrada automaticamente)\n\n"
         )
         
         # Adiciona estatísticas de qualidade
@@ -4043,10 +4059,13 @@ async def on_import_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"3. O motorista receberá o mapa interativo"
         )
         
-        await query.edit_message_text(
-            success_text,
-            parse_mode='Markdown'
-        )
+        try:
+            await query.edit_message_text(
+                success_text,
+                parse_mode='Markdown'
+            )
+        except Exception:
+            await query.edit_message_text(success_text)
         
         # Limpa dados do context
         context.user_data.pop('pending_import', None)
@@ -4057,12 +4076,14 @@ async def on_import_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         db.rollback()
         logger.error(f"Erro ao importar pacotes: {str(e)}", exc_info=True)
-        await query.edit_message_text(
-            f"❌ *Erro ao Importar*\n\n"
-            f"Detalhes: {str(e)}\n\n"
-            f"💡 Tente novamente com /importar",
-            parse_mode='Markdown'
-        )
+        try:
+            await query.edit_message_text(
+                f"❌ Erro ao Importar\n\n"
+                f"Detalhes: {str(e)}\n\n"
+                f"Tente novamente com /importar"
+            )
+        except Exception:
+            await query.edit_message_text("Erro ao importar. Tente novamente com /importar")
         return ConversationHandler.END
     finally:
         db.close()
