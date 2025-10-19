@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 from math import radians, sin, cos, sqrt, asin
+import json
 
 import pandas as pd
 try:
@@ -473,6 +474,56 @@ def _build_delivery_mode_keyboard() -> ReplyKeyboardMarkup:
 async def _prompt_delivery_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, package_ids: List[int]) -> int:
     """Store target package IDs and prompt the driver to choose the flow."""
     keyboard = _build_delivery_mode_keyboard()
+    # Envia um breve resumo da rota antes de iniciar o fluxo, uma única vez por rota
+    try:
+        first_id = package_ids[0]
+        db = SessionLocal()
+        try:
+            pkg = db.get(Package, int(first_id)) if first_id is not None else None
+            if pkg and pkg.route_id:
+                sent_key = f"route_brief_sent_{pkg.route_id}"
+                if not context.user_data.get(sent_key):
+                    # Coleta métricas simples da rota
+                    total = db.query(Package).filter(Package.route_id == pkg.route_id).count()
+                    delivered = db.query(Package).filter(Package.route_id == pkg.route_id, Package.status == "delivered").count()
+                    failed = db.query(Package).filter(Package.route_id == pkg.route_id, Package.status == "failed").count()
+                    pending = max(0, total - delivered - failed)
+                    route = db.get(Route, int(pkg.route_id))
+                    route_name = (route.name or f"Rota {route.id}") if route else f"Rota {pkg.route_id}"
+                    salary = getattr(route, 'driver_salary', None) if route else None
+                    revenue = getattr(route, 'revenue', None) if route else None
+                    # Link do mapa (caso o motorista prefira abrir)
+                    try:
+                        driver_tid = update.effective_user.id
+                        link = f"{BASE_URL}/map/{pkg.route_id}/{driver_tid}"
+                    except Exception:
+                        link = None
+                    # Monta mensagem (HTML seguro)
+                    msg_lines = [
+                        "🚚 <b>Início da Rota</b>",
+                        f"📦 <b>Rota:</b> {html.escape(route_name)} (ID {pkg.route_id})",
+                        f"🧮 <b>Pacotes:</b> {total} · ⏳ Pendentes {pending} · ✅ Entregues {delivered} · ❌ Falhas {failed}",
+                    ]
+                    fin_bits = []
+                    if revenue is not None:
+                        fin_bits.append(f"Receita R$ {float(revenue):,.2f}")
+                    if salary is not None:
+                        fin_bits.append(f"Salário R$ {float(salary):,.2f}")
+                    if fin_bits:
+                        msg_lines.append("💼 <b>Financeiro:</b> " + " · ".join(fin_bits))
+                    if link:
+                        msg_lines.append(f"🗺️ <a href=\"{html.escape(link)}\">Mapa Interativo</a>")
+                    msg_lines.append("— Use o botão <i>Entregar</i> para começar.")
+                    await update.message.reply_text("\n".join(msg_lines), parse_mode='HTML', disable_web_page_preview=True)
+                    context.user_data[sent_key] = True
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
+    except Exception:
+        # Se algo falhar no resumo, ignora silenciosamente para não travar o fluxo
+        pass
     if len(package_ids) > 1:
         context.user_data["deliver_package_ids"] = package_ids
         context.user_data.pop("deliver_package_id", None)
@@ -5640,52 +5691,52 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def _format_report(title: str, k: dict) -> str:
         eb_items = []
         for t, v in sorted(k.get("expense_breakdown", {}).items()):
-            eb_items.append(f"<code>{esc(t)}</code>: R$ {v:,.2f}")
+            eb_items.append(f"_{t}_: R$ {v:,.2f}")
         eb = " · ".join(eb_items) or "-"
         return (
-            f"{esc(title)}\n"
-            f"📅 <b>Período:</b> <code>{esc(k['period']['start'])}</code> a <code>{esc(k['period']['end'])}</code>\n"
-            f"💵 <b>Receita:</b> R$ {k['income_total']:,.2f}   ·   🧾 <b>Despesas:</b> R$ {k['expense_total']:,.2f}\n"
-            f"💚 <b>Lucro:</b> R$ {k['profit']:,.2f}   ·   🚘 <b>KM:</b> {k['km_total']:,.0f}\n"
-            f"🧩 <b>Rotas:</b> concl. {k['routes_completed']} · final. {k['routes_finalized']}\n"
-            f"📦 <b>Entregues:</b> {k['delivered']} · ❌ <b>Falhas:</b> {k['failed']} · ✅ <b>Sucesso:</b> {k['success_rate']:.1f}%\n"
-            f"📈 <b>Médias por rota:</b> Receita R$ {k['avg_income_per_route']:,.2f} · Despesa R$ {k['avg_expense_per_route']:,.2f}\n"
-            f"🏷️ <b>Despesas por tipo:</b> {eb}"
+            f"*{title}*\n"
+            f"📅 *Período:* `{k['period']['start']}` a `{k['period']['end']}`\n"
+            f"💵 *Receita:* R$ {k['income_total']:,.2f}   ·   🧾 *Despesas:* R$ {k['expense_total']:,.2f}\n"
+            f"💚 *Lucro:* R$ {k['profit']:,.2f}   ·   🚘 *KM:* {k['km_total']:,.0f}\n"
+            f"🧩 *Rotas:* concl\\. {k['routes_completed']} · final\\. {k['routes_finalized']}\n"
+            f"📦 *Entregues:* {k['delivered']} · ❌ *Falhas:* {k['failed']} · ✅ *Sucesso:* {k['success_rate']:.1f}%\n"
+            f"📈 *Médias por rota:* Receita R$ {k['avg_income_per_route']:,.2f} · Despesa R$ {k['avg_expense_per_route']:,.2f}\n"
+            f"🏷️ *Despesas por tipo:* {eb}"
         )
 
     def _format_compare(title: str, a_label: str, a: dict, b_label: str, b: dict) -> str:
         def delta(v1, v2):
             try:
                 if v2 == 0:
-                    return "(+∞)" if v1 > 0 else "(0)"
+                    return "(\\+∞)" if v1 > 0 else "(0)"
                 p = (v1 - v2) / v2 * 100
                 arrow = "⬆️" if p > 0 else ("⬇️" if p < 0 else "➖")
                 return f"{arrow} {p:+.1f}%"
             except Exception:
                 return ""
 
-        lines = [f"{esc(title)}"]
+        lines = [f"*{title}*"]
         metrics = [
             ("Receita", a['income_total'], b['income_total']),
             ("Despesas", a['expense_total'], b['expense_total']),
             ("Lucro", a['profit'], b['profit']),
             ("KM", a['km_total'], b['km_total']),
-            ("Rotas concl.", a['routes_completed'], b['routes_completed']),
+            ("Rotas concl\\.", a['routes_completed'], b['routes_completed']),
             ("Entregues", a['delivered'], b['delivered']),
             ("Falhas", a['failed'], b['failed']),
             ("Sucesso %", a['success_rate'], b['success_rate']),
         ]
-        lines.append(f"🅰️ <b>{esc(a_label)}</b>: <code>{esc(a['period']['start'])}</code> a <code>{esc(a['period']['end'])}</code>")
-        lines.append(f"🅱️ <b>{esc(b_label)}</b>: <code>{esc(b['period']['start'])}</code> a <code>{esc(b['period']['end'])}</code>")
+        lines.append(f"🅰️ *{a_label}*: `{a['period']['start']}` a `{a['period']['end']}`")
+        lines.append(f"🅱️ *{b_label}*: `{b['period']['start']}` a `{b['period']['end']}`")
         for name, va, vb in metrics:
             if isinstance(va, (int, float)) and isinstance(vb, (int, float)):
                 comp = delta(va, vb)
                 if name in ("Receita", "Despesas", "Lucro", "Média Receita/Rota", "Média Despesa/Rota"):
-                    lines.append(f"• <b>{esc(name)}:</b> R$ {va:,.2f} vs R$ {vb:,.2f} <i>{comp}</i>")
+                    lines.append(f"• *{name}:* R$ {va:,.2f} vs R$ {vb:,.2f} _{comp}_")
                 elif name == "Sucesso %":
-                    lines.append(f"• <b>{esc(name)}:</b> {va:.1f}% vs {vb:.1f}% <i>{comp}</i>")
+                    lines.append(f"• *{name}:* {va:.1f}% vs {vb:.1f}% _{comp}_")
                 else:
-                    lines.append(f"• <b>{esc(name)}:</b> {va} vs {vb} <i>{comp}</i>")
+                    lines.append(f"• *{name}:* {va} vs {vb} _{comp}_")
         return "\n".join(lines)
 
     question = _extract_command_argument(update, context)
@@ -5719,8 +5770,8 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             last = ("passada" in qlow) or ("anterior" in qlow)
             start, end = _week_range(now, offset_weeks=-1 if last else 0)
             k = _kpis(db, start, end)
-            report = _format_report("📊 <b>Relatório Semanal</b>", k)
-            await context.bot.send_message(chat_id=target_chat_id, text=report, parse_mode='HTML')
+            report = _format_report("📊 Relatório Semanal", k)
+            await context.bot.send_message(chat_id=target_chat_id, text=report, parse_mode='MarkdownV2')
             return
 
         # 2) Comparação entre semanas (atual vs passada)
@@ -5729,8 +5780,8 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             b_start, b_end = _week_range(now, -1)
             a = _kpis(db, a_start, a_end)
             b = _kpis(db, b_start, b_end)
-            comp = _format_compare("📈 <b>Comparação</b>: Semana Atual vs Semana Passada", "Semana Atual", a, "Semana Passada", b)
-            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='HTML')
+            comp = _format_compare("📈 Comparação: Semana Atual vs Semana Passada", "Semana Atual", a, "Semana Passada", b)
+            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='MarkdownV2')
             return
 
         # 3) Comparação entre meses (atual vs anterior)
@@ -5739,8 +5790,8 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             b_start, b_end = _month_range(now, -1)
             a = _kpis(db, a_start, a_end)
             b = _kpis(db, b_start, b_end)
-            comp = _format_compare("📈 <b>Comparação</b>: Mês Atual vs Mês Anterior", "Mês Atual", a, "Mês Anterior", b)
-            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='HTML')
+            comp = _format_compare("📈 Comparação: Mês Atual vs Mês Anterior", "Mês Atual", a, "Mês Anterior", b)
+            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='MarkdownV2')
             return
 
         # 4) Conselho/Opinião com base nos números (usa IA com KPIs como contexto)
@@ -5769,13 +5820,21 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         sys = (
-            "Você é um contador/tesoureiro da empresa e só deve opinar com base nos números fornecidos. "
-            "Responda de forma direta, em pt-BR, com 3-6 bullets objetivos, curtos e acionáveis (máx. 20 palavras por bullet). "
-            "Aponte riscos e oportunidades quando houver, e evite suposições sem dado. Não use markdown complexo."
+            "Você é um CFO (diretor financeiro) experiente de uma empresa de entregas. "
+            "Sua missão é dar análises estratégicas completas e acionáveis com base nos dados fornecidos. "
+            "Foque em: (1) Tendências e padrões (crescimento/queda receita, despesas, lucro), "
+            "(2) Comparações entre períodos (semanal, mensal), "
+            "(3) Riscos operacionais e financeiros, "
+            "(4) Oportunidades de otimização (rotas, salários, custos), "
+            "(5) Projeções e recomendações para os próximos períodos. "
+            "Responda em pt-BR, de forma direta mas profunda, em 8-15 bullets curtos (máx. 25 palavras cada). "
+            "Use negrito em **termos-chave** e itálico em *valores importantes*. "
+            "Mostre domínio dos números e não hesite em apontar alertas vermelhos ou bandeiras verdes. "
+            "Evite generalizações sem dado. Seja assertivo e confiável."
         )
         usr = (
-            f"Pergunta: {question}\n\n"
-            f"Métricas (JSON): {context_blob}"
+            f"Pergunta/Pedido: {question}\n\n"
+            f"Dados detalhados (JSON):\n{json.dumps(context_blob, indent=2, ensure_ascii=False)}"
         )
         try:
             resp = groq_client.chat.completions.create(
@@ -5785,47 +5844,41 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     {"role": "user", "content": usr},
                 ],
                 temperature=0.2,
-                max_tokens=600,
+                max_tokens=1200,
             )
             raw = (resp.choices[0].message.content or "").strip()
         except Exception:
             raw = (
-                "Não consegui acessar a IA agora. Segue contexto numérico:\n" +
-                _format_report("Mês Atual", k_curr_month) + "\n" +
-                _format_report("Mês Anterior", k_prev_month) + "\n" +
-                _format_report("Semana Atual", k_curr_week) + "\n" +
+                "Não consegui acessar a IA agora. Segue contexto numérico:\n\n" +
+                _format_report("Mês Atual", k_curr_month) + "\n\n" +
+                _format_report("Mês Anterior", k_prev_month) + "\n\n" +
+                _format_report("Semana Atual", k_curr_week) + "\n\n" +
                 _format_report("Semana Passada", k_prev_week)
             )
 
-        def md_to_html_compact(text: str) -> str:
-            # Normaliza quebras e remove espaçamentos excessivos
-            t = text.replace('\r', '')
-            # Converte **bold** simples
-            t = re.sub(r"\*\*([^*]+)\*\*", lambda m: f"<b>{html.escape(m.group(1))}</b>", t)
-            # Itálico simples *x*
-            t = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", lambda m: f"<i>{html.escape(m.group(1))}</i>", t)
-            # Transformar bullets que começam com - ou * em '• '
+        # Limpa e formata a resposta em Markdown limpo
+        def clean_md(text: str) -> str:
+            # Remove espaços excessivos, normaliza quebras
+            t = text.replace('\r', '').strip()
+            # Substitui bullets de hífen por bullets reais
             lines = []
             for line in t.split('\n'):
                 s = line.strip()
                 if s.startswith('- ') or s.startswith('* '):
-                    content = s[2:].strip()
-                    lines.append('• ' + html.escape(content))
+                    lines.append('• ' + s[2:].strip())
                 elif s:
-                    lines.append(html.escape(s))
-            # Limita a 6 bullets/sentenças curtas
-            if len(lines) > 6:
-                lines = lines[:6]
+                    lines.append(s)
             return '\n'.join(lines)
 
-        compact = md_to_html_compact(raw)
-        title = "🧮 <b>Parecer Financeiro</b>"
-        qline = f"🗣️ <i>{esc(question)}</i>"
-        final_msg = f"{title}\n{qline}\n\n{compact}"
+        answer = clean_md(raw)
+        # Monta mensagem final com cabeçalho e corpo
+        header = f"🧮 *Parecer Financeiro (CFO)*\n� _{question}_\n"
+        final_msg = header + "\n" + answer
         try:
-            await context.bot.send_message(chat_id=target_chat_id, text=final_msg, parse_mode='HTML')
+            await context.bot.send_message(chat_id=target_chat_id, text=final_msg, parse_mode='Markdown')
         except Exception:
-            await update.message.reply_text(re.sub('<[^>]+>', '', final_msg))
+            # Fallback sem formatação se Markdown falhar
+            await update.message.reply_text(final_msg.replace('*', '').replace('_', ''))
     finally:
         db.close()
 
