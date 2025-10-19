@@ -2076,30 +2076,35 @@ async def cmd_configurar_canal_analise(update: Update, context: ContextTypes.DEF
         me = get_user_by_tid(db, update.effective_user.id)
         if not me or me.role != "manager":
             await update.message.reply_text(
-                "⛔ *Acesso Negado*\n\n"
-                "Apenas gerentes podem configurar canais.",
-                parse_mode='Markdown'
+                "⛔ Acesso Negado\n\n"
+                "Apenas gerentes podem configurar canais."
             )
             return
         
         # Pega o canal_id do usuário se já tem
         if me.channel_id:
-            await update.message.reply_text(
-                "📢 *Canal Configurado*\n\n"
+            text = (
+                "📢 Canal Configurado\n\n"
                 f"ID atual: `{me.channel_id}`\n\n"
-                "📝 *Para mudar*, responda com o novo ID do canal\n"
-                "(Ex: -1003024500289)\n\n"
-                "💡 Dica: Use /meu\\_id dentro do canal para pegar o ID",
-                parse_mode='MarkdownV2'
+                "📝 Para mudar, responda com o novo ID do canal\n"
+                "Ex: `-1003024500289`\n\n"
+                "💡 Dica: Use `/meu_id` dentro do canal para pegar o ID"
             )
+            try:
+                await update.message.reply_text(text, parse_mode='Markdown')
+            except Exception:
+                await update.message.reply_text(text)
         else:
-            await update.message.reply_text(
-                "📢 *Nenhum Canal Configurado*\n\n"
+            text = (
+                "📢 Nenhum Canal Configurado\n\n"
                 "📝 Responda com o ID do seu canal de análise\n"
-                "(Ex: -1003024500289)\n\n"
-                "💡 Dica: Use /meu\\_id dentro do canal para pegar o ID",
-                parse_mode='MarkdownV2'
+                "Ex: `-1003024500289`\n\n"
+                "💡 Dica: Use `/meu_id` dentro do canal para pegar o ID"
             )
+            try:
+                await update.message.reply_text(text, parse_mode='Markdown')
+            except Exception:
+                await update.message.reply_text(text)
         
         # Armazena o estado na conversa
         context.user_data['waiting_for_channel_id'] = True
@@ -2125,13 +2130,16 @@ async def handle_channel_id_input(update: Update, context: ContextTypes.DEFAULT_
         
         # Valida se é um número negativo (formato de canal Telegram)
         if not channel_id.startswith('-') or not channel_id[1:].isdigit():
-            await update.message.reply_text(
-                "❌ *Formato Inválido*\n\n"
+            text = (
+                "❌ Formato Inválido\n\n"
                 "O ID do canal deve ser um número negativo\n"
-                "Ex: \\-1003024500289\n\n"
-                "Tente novamente ou /cancelar",
-                parse_mode='MarkdownV2'
+                "Ex: `-1003024500289`\n\n"
+                "Tente novamente ou /cancelar"
             )
+            try:
+                await update.message.reply_text(text, parse_mode='Markdown')
+            except Exception:
+                await update.message.reply_text(text)
             return
         
         # Salva o ID do canal no banco
@@ -2142,12 +2150,15 @@ async def handle_channel_id_input(update: Update, context: ContextTypes.DEFAULT_
         # Limpa o estado
         context.user_data.pop('waiting_for_channel_id', None)
         
-        await update.message.reply_text(
-            "✅ *Canal Configurado com Sucesso\\!*\n\n"
+        text = (
+            "✅ Canal Configurado com Sucesso!\n\n"
             f"ID: `{channel_id}`\n\n"
-            "🎉 Agora seus relatórios serão enviados neste canal quando você usar /relatorio",
-            parse_mode='MarkdownV2'
+            "🎉 Agora seus relatórios serão enviados neste canal quando você usar /relatorio"
         )
+        try:
+            await update.message.reply_text(text, parse_mode='Markdown')
+        except Exception:
+            await update.message.reply_text(text)
         
     except Exception as e:
         await update.message.reply_text(f"❌ Erro: {str(e)}")
