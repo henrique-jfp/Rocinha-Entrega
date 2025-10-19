@@ -76,15 +76,16 @@
   // ============================================
   
   // Define cores vibrantes para diferentes áreas
+  // Paleta sem verde/vermelho para não conflitar com status Entregue/Falhou
   const AREA_COLORS = [
-    { primary: '#9333ea', shadow: 'rgba(147, 51, 234, 0.4)', name: 'Roxo' },      // Área 1
-    { primary: '#ec4899', shadow: 'rgba(236, 72, 153, 0.4)', name: 'Rosa' },      // Área 2
-    { primary: '#f59e0b', shadow: 'rgba(245, 158, 11, 0.4)', name: 'Laranja' },   // Área 3
-    { primary: '#10b981', shadow: 'rgba(16, 185, 129, 0.4)', name: 'Verde' },     // Área 4
-    { primary: '#3b82f6', shadow: 'rgba(59, 130, 246, 0.4)', name: 'Azul' },      // Área 5
-    { primary: '#ef4444', shadow: 'rgba(239, 68, 68, 0.4)', name: 'Vermelho' },   // Área 6
-    { primary: '#8b5cf6', shadow: 'rgba(139, 92, 246, 0.4)', name: 'Violeta' },   // Área 7
-    { primary: '#06b6d4', shadow: 'rgba(6, 182, 212, 0.4)', name: 'Ciano' },      // Área 8
+    { primary: '#7c3aed', shadow: 'rgba(124, 58, 237, 0.35)', name: 'Roxo' },     // 1
+    { primary: '#f59e0b', shadow: 'rgba(245, 158, 11, 0.35)', name: 'Laranja' },  // 2
+    { primary: '#3b82f6', shadow: 'rgba(59, 130, 246, 0.35)', name: 'Azul' },     // 3
+    { primary: '#06b6d4', shadow: 'rgba(6, 182, 212, 0.35)', name: 'Ciano' },     // 4
+    { primary: '#a855f7', shadow: 'rgba(168, 85, 247, 0.35)', name: 'Violeta' },  // 5
+    { primary: '#f97316', shadow: 'rgba(249, 115, 22, 0.35)', name: 'Âmbar' },    // 6
+    { primary: '#0ea5e9', shadow: 'rgba(14, 165, 233, 0.35)', name: 'Azul Claro'},// 7
+    { primary: '#6366f1', shadow: 'rgba(99, 102, 241, 0.35)', name: 'Índigo' },   // 8
   ];
 
   // Divide pacotes em áreas geográficas usando K-means simplificado

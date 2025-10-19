@@ -434,7 +434,11 @@ class DeliveryLinkError(Exception):
 def _extract_command_argument(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[str]:
     """Return the first argument passed to a command, including text fallback."""
     if context.args:
-        return context.args[0]
+        # Usa todos os argumentos após o comando, não apenas o primeiro
+        try:
+            return " ".join(context.args).strip()
+        except Exception:
+            return context.args[0]
     if update.message and update.message.text:
         parts = update.message.text.strip().split(maxsplit=1)
         if len(parts) == 2:
@@ -1823,6 +1827,7 @@ Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
                 
                 # Define destino preferido: canal/grupo de análise, se configurado
                 preferred_chat_id = me.channel_id if me.channel_id else update.effective_chat.id
+                model_label = ai_model_name or "Groq"
                 # Divide relatório em mensagens (limite Telegram: 4096 chars)
                 max_length = 4000
                 if len(ai_analysis) <= max_length:
@@ -1831,8 +1836,13 @@ Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
                     try:
                         await context.bot.send_message(chat_id=preferred_chat_id, text=msg_text, parse_mode='Markdown')
                     except Exception as ch_err:
-                        print(f"Aviso: Não consegui enviar para o destino preferido: {ch_err}")
-                        await processing_msg.edit_text(msg_text, parse_mode='Markdown')
+                        print(f"Aviso: Não consegui enviar para o destino preferido (Markdown): {ch_err}")
+                        # Fallback sem Markdown
+                        try:
+                            await context.bot.send_message(chat_id=preferred_chat_id, text=msg_text)
+                        except Exception as ch_err2:
+                            print(f"Aviso: Fallback sem Markdown também falhou: {ch_err2}")
+                            await processing_msg.edit_text(msg_text, parse_mode='Markdown')
                     else:
                         # Confirmação breve no privado, se necessário
                         if preferred_chat_id != update.effective_chat.id:
@@ -1847,16 +1857,23 @@ Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
                         for part in parts[1:]:
                             await context.bot.send_message(chat_id=preferred_chat_id, text=part, parse_mode='Markdown')
                     except Exception as ch_err:
-                        print(f"Aviso: Não consegui enviar partes ao destino preferido: {ch_err}")
-                        msg1 = await update.message.reply_text(first_msg, parse_mode='Markdown')
-                        for part in parts[1:]:
-                            await update.message.reply_text(part, parse_mode='Markdown')
+                        print(f"Aviso: Não consegui enviar partes ao destino preferido (Markdown): {ch_err}")
+                        # Fallback sem Markdown
+                        try:
+                            await context.bot.send_message(chat_id=preferred_chat_id, text=first_msg)
+                            for part in parts[1:]:
+                                await context.bot.send_message(chat_id=preferred_chat_id, text=part)
+                        except Exception as ch_err2:
+                            print(f"Aviso: Fallback sem Markdown também falhou: {ch_err2}")
+                            msg1 = await update.message.reply_text(first_msg, parse_mode='Markdown')
+                            for part in parts[1:]:
+                                await update.message.reply_text(part, parse_mode='Markdown')
                 
                 # Mensagem final
                 if preferred_chat_id == update.effective_chat.id:
                     await update.message.reply_text(
                         f"✅ *Relatório salvo!*\n\n"
-                        f"🤖 Gerado por IA Groq (Llama 3.1)\n"
+                        f"🤖 Gerado por IA Groq ({model_label})\n"
                         f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n"
                         f"_Use /relatorio novamente para atualizar._",
                         parse_mode='Markdown'
@@ -4501,14 +4518,8 @@ async def fail_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
-        # Opcional: notificar gerentes
-        try:
-            await notify_managers(
-                f"❌ Insucesso registrado para pacote {package.tracking_code} (rota {route_id}). Motivo: {context.user_data.get('fail_notes')}",
-                context
-            )
-        except Exception:
-            pass
+        # Não notificar gerentes/grupo de análise para insucessos (somente canal do motorista)
+        pass
 
     finally:
         db.close()
@@ -4840,27 +4851,8 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
     
-    # ✅ FASE 4.2: NOTIFICA GERENTES SE ROTA FOI COMPLETADA
-    if route_id and remaining_packages == 0 and total_packages > 0:
-        # Abre nova sessão para buscar dados atualizados da rota
-        db_notify = SessionLocal()
-        try:
-            route_complete = db_notify.get(Route, route_id)
-            if route_complete and route_complete.status == "completed":
-                notify_text = (
-                    f"🎉 *Rota Completa!*\n\n"
-                    f"📛 {route_complete.name or f'Rota {route_id}'}\n"
-                    f"👤 Motorista: {driver_name}\n"
-                    f"📦 {total_packages} pacotes entregues\n\n"
-                    f"💰 *Resumo Financeiro:*\n"
-                    f"💵 Receita: R$ {route_complete.revenue:.2f}\n"
-                    f"💼 Salário: R$ {route_complete.driver_salary:.2f}\n"
-                    f"📊 Lucro Bruto: R$ {route_complete.revenue - route_complete.driver_salary:.2f}\n\n"
-                    f"💡 Use /rotas para finalizar e adicionar despesas extras."
-                )
-                await notify_managers(notify_text, context)
-        finally:
-            db_notify.close()
+    # Requisito: não notificar gerentes automaticamente quando rota for completada
+    # Mantemos foco apenas no canal do motorista e no fluxo de finalização pelo bot.
     
     # ✅ FASE 2.3: NOTIFICAÇÃO COM DADOS CONSOLIDADOS
     # Mensagem formatada para o canal (sem asteriscos, mais limpo)
@@ -4988,127 +4980,114 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
         except Exception as e:
-            # Se falhar, envia para os managers como fallback
-            await notify_managers(f"⚠️ Erro ao enviar para canal: {str(e)}\n\n{summary}", context)
-            
+            # Fallback: envia no chat atual (não notifica gerentes)
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⚠️ Não foi possível enviar ao canal do motorista: {str(e)}\n\n{summary}")
+            except Exception:
+                pass
             p1 = context.user_data.get("photo1_file_id")
             p2 = context.user_data.get("photo2_file_id")
-            if p1 or p2:
-                dbm = SessionLocal()
+            if p1:
                 try:
-                    managers = dbm.query(User).filter(User.role == "manager").all()
-                finally:
-                    dbm.close()
-                for m in managers:
+                    await context.bot.send_photo(chat_id=update.effective_chat.id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
+                except Exception:
+                    pass
+            if p2:
+                try:
+                    await context.bot.send_photo(chat_id=update.effective_chat.id, photo=p2, caption="Foto 2 - Local/Porta")
+                except Exception:
+                    pass
+    else:
+            # Sem canal configurado - envia no chat atual (sem notificar gerentes)
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=summary)
+            except Exception:
+                pass
+            p1 = context.user_data.get("photo1_file_id")
+            p2 = context.user_data.get("photo2_file_id")
+            mass_list = context.user_data.get("mass_photos") or []
+            if mass_list:
+                batch = []
+                for idx, fid in enumerate(mass_list, start=1):
+                    cap = "Pacote" if idx == 1 else None
+                    batch.append(InputMediaPhoto(fid, caption=cap))
+                    if len(batch) == 10:
+                        try:
+                            await context.bot.send_media_group(chat_id=update.effective_chat.id, media=batch)
+                        except Exception:
+                            for item in batch:
+                                try:
+                                    await context.bot.send_photo(chat_id=update.effective_chat.id, photo=item.media, caption=item.caption)
+                                except Exception:
+                                    pass
+                        batch = []
+                if batch:
+                    try:
+                        await context.bot.send_media_group(chat_id=update.effective_chat.id, media=batch)
+                    except Exception:
+                        for item in batch:
+                            try:
+                                await context.bot.send_photo(chat_id=update.effective_chat.id, photo=item.media, caption=item.caption)
+                            except Exception:
+                                pass
+                if p2:
+                    try:
+                        await context.bot.send_photo(chat_id=update.effective_chat.id, photo=p2, caption="Local/Porta")
+                    except Exception:
+                        pass
+            else:
+                if p1 and p2:
+                    media = [
+                        InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
+                        InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
+                    ]
+                    try:
+                        await context.bot.send_media_group(chat_id=update.effective_chat.id, media=media)
+                    except Exception:
+                        if p1:
+                            try:
+                                await context.bot.send_photo(chat_id=update.effective_chat.id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
+                            except Exception:
+                                pass
+                        if p2:
+                            try:
+                                await context.bot.send_photo(chat_id=update.effective_chat.id, photo=p2, caption="Foto 2 - Local/Porta")
+                            except Exception:
+                                pass
+                else:
                     if p1:
                         try:
-                            await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="Foto 1")
+                            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
                         except Exception:
                             pass
                     if p2:
                         try:
-                            await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Foto 2")
+                            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=p2, caption="Foto 2 - Local/Porta")
                         except Exception:
                             pass
-    else:
-            # Sem canal configurado - envia para os MANAGERS (comportamento original)
-            await notify_managers(summary, context)
-            
-            p1 = context.user_data.get("photo1_file_id")
-            p2 = context.user_data.get("photo2_file_id")
-            mass_list = context.user_data.get("mass_photos") or []
-            if p1 or p2:
-                dbm = SessionLocal()
-                try:
-                    managers = dbm.query(User).filter(User.role == "manager").all()
-                finally:
-                    dbm.close()
-                for m in managers:
-                    if mass_list:
-                        # Envia mass photos em lotes
-                        batch = []
-                        for idx, fid in enumerate(mass_list, start=1):
-                            cap = "Pacote"
-                            batch.append(InputMediaPhoto(fid, caption=cap if idx == 1 else None))
-                            if len(batch) == 10:
-                                try:
-                                    await context.bot.send_media_group(chat_id=m.telegram_user_id, media=batch)
-                                except Exception:
-                                    for item in batch:
-                                        try:
-                                            await context.bot.send_photo(chat_id=m.telegram_user_id, photo=item.media, caption=item.caption)
-                                        except Exception:
-                                            pass
-                                batch = []
-                        if batch:
-                            try:
-                                await context.bot.send_media_group(chat_id=m.telegram_user_id, media=batch)
-                            except Exception:
-                                for item in batch:
-                                    try:
-                                        await context.bot.send_photo(chat_id=m.telegram_user_id, photo=item.media, caption=item.caption)
-                                    except Exception:
-                                        pass
-                        if p2:
-                            try:
-                                await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Local/Porta")
-                            except Exception:
-                                pass
-                    else:
-                        # Fluxo unitário
-                        if p1 and p2:
-                            media = [
-                                InputMediaPhoto(p1, caption="Foto 1 - Recebedor/Pacote"),
-                                InputMediaPhoto(p2, caption="Foto 2 - Local/Porta")
-                            ]
-                            try:
-                                await context.bot.send_media_group(chat_id=m.telegram_user_id, media=media)
-                            except Exception:
-                                # Se falhar, envia separadas
-                                if p1:
-                                    try:
-                                        await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
-                                    except Exception:
-                                        pass
-                                if p2:
-                                    try:
-                                        await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Foto 2 - Local/Porta")
-                                    except Exception:
-                                        pass
-                        else:
-                            if p1:
-                                try:
-                                    await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p1, caption="Foto 1 - Recebedor/Pacote")
-                                except Exception:
-                                    pass
-                            if p2:
-                                try:
-                                    await context.bot.send_photo(chat_id=m.telegram_user_id, photo=p2, caption="Foto 2 - Local/Porta")
-                                except Exception:
-                                    pass
-                
-                # ✅ FASE 2.2: REUTILIZA MESMA CONEXÃO PARA PROGRESSO
-                # Envia progresso após as fotos para os managers
-                for m in managers:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=m.telegram_user_id,
-                            text=progress_message
-                        )
-                    except Exception:
-                        pass
+            # Envia progresso após as fotos
+            try:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=progress_message
+                )
+            except Exception:
+                pass
 
     # ✅ FASE 2.3: MENSAGEM FINAL DETALHADA COM SUCESSO
     # Atualiza mensagem de preview para sucesso final
-    await preview_msg.edit_text(
-        f"✅ *Entrega Finalizada!*\n\n"
-        f"📦 Pacote{'s' if pkg_ids else ''}: {', '.join(delivered_codes[:3]) if delivered_codes else '-'}\n"
-        f"👤 Recebedor: {receiver_name}\n"
-        f"📍 Local: {primary_addr or '-'}\n"
-        f"⏰ Horário: {datetime.now().strftime('%H:%M')}\n\n"
-        f"✉️ Gerentes notificados com sucesso!",
-        parse_mode='Markdown'
-    )
+    try:
+        await preview_msg.edit_text(
+            f"✅ *Entrega Finalizada!*\n\n"
+            f"📦 Pacote{'s' if pkg_ids else ''}: {', '.join(delivered_codes[:3]) if delivered_codes else '-'}\n"
+            f"👤 Recebedor: {receiver_name}\n"
+            f"📍 Local: {primary_addr or '-'}\n"
+            f"⏰ Horário: {datetime.now().strftime('%H:%M')}\n\n"
+            f"📨 Comprovante registrado.",
+            parse_mode='Markdown'
+        )
+    except Exception:
+        pass
     
     # Monta link do mapa interativo para continuar a rota
     map_url = None
