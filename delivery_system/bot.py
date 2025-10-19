@@ -1819,60 +1819,48 @@ Gere o RELATÓRIO EXECUTIVO PROFISSIONAL agora:"""
                     parse_mode='Markdown'
                 )
                 
+                # Define destino preferido: canal/grupo de análise, se configurado
+                preferred_chat_id = me.channel_id if me.channel_id else update.effective_chat.id
                 # Divide relatório em mensagens (limite Telegram: 4096 chars)
                 max_length = 4000
                 if len(ai_analysis) <= max_length:
                     msg_text = f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{ai_analysis}"
-                    await processing_msg.edit_text(msg_text, parse_mode='Markdown')
-                    
-                    # Se tem canal configurado, envia lá também
-                    if me.channel_id:
-                        try:
-                            await context.bot.send_message(
-                                chat_id=me.channel_id,
-                                text=msg_text,
-                                parse_mode='Markdown'
-                            )
-                        except Exception as ch_err:
-                            print(f"Aviso: Não consegui enviar para o canal: {ch_err}")
+                    # Envia para o destino preferido
+                    try:
+                        await context.bot.send_message(chat_id=preferred_chat_id, text=msg_text, parse_mode='Markdown')
+                    except Exception as ch_err:
+                        print(f"Aviso: Não consegui enviar para o destino preferido: {ch_err}")
+                        await processing_msg.edit_text(msg_text, parse_mode='Markdown')
+                    else:
+                        # Confirmação breve no privado, se necessário
+                        if preferred_chat_id != update.effective_chat.id:
+                            await processing_msg.edit_text("✅ Relatório enviado ao grupo de análise.")
                 else:
                     # Envia em partes
                     await processing_msg.delete()
                     parts = [ai_analysis[i:i+max_length] for i in range(0, len(ai_analysis), max_length)]
-                    
                     first_msg = f"📊 *Relatório Financeiro - {now.strftime('%B/%Y')}*\n\n{parts[0]}"
-                    msg1 = await update.message.reply_text(first_msg, parse_mode='Markdown')
-                    
-                    for part in parts[1:]:
-                        await update.message.reply_text(part, parse_mode='Markdown')
-                    
-                    # Se tem canal, envia lá também
-                    if me.channel_id:
-                        try:
-                            await context.bot.send_message(
-                                chat_id=me.channel_id,
-                                text=first_msg,
-                                parse_mode='Markdown'
-                            )
-                            for part in parts[1:]:
-                                await context.bot.send_message(
-                                    chat_id=me.channel_id,
-                                    text=part,
-                                    parse_mode='Markdown'
-                                )
-                        except Exception as ch_err:
-                            print(f"Aviso: Não consegui enviar para o canal: {ch_err}")
+                    try:
+                        await context.bot.send_message(chat_id=preferred_chat_id, text=first_msg, parse_mode='Markdown')
+                        for part in parts[1:]:
+                            await context.bot.send_message(chat_id=preferred_chat_id, text=part, parse_mode='Markdown')
+                    except Exception as ch_err:
+                        print(f"Aviso: Não consegui enviar partes ao destino preferido: {ch_err}")
+                        msg1 = await update.message.reply_text(first_msg, parse_mode='Markdown')
+                        for part in parts[1:]:
+                            await update.message.reply_text(part, parse_mode='Markdown')
                 
                 # Mensagem final
-                canal_info = "📢 *Enviado para o canal também!*\n" if me.channel_id else ""
-                await update.message.reply_text(
-                    f"✅ *Relatório salvo!*\n\n"
-                    f"🤖 Gerado por IA Groq (Llama 3.1)\n"
-                    f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n"
-                    f"{canal_info}"
-                    f"_Use /relatorio novamente para atualizar._",
-                    parse_mode='Markdown'
-                )
+                if preferred_chat_id == update.effective_chat.id:
+                    await update.message.reply_text(
+                        f"✅ *Relatório salvo!*\n\n"
+                        f"🤖 Gerado por IA Groq (Llama 3.1)\n"
+                        f"📅 {now.strftime('%d/%m/%Y %H:%M')}\n"
+                        f"_Use /relatorio novamente para atualizar._",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text("✅ Relatório enviado ao grupo de análise.")
                 ai_report_generated = True
                 
             except Exception as e:
@@ -5554,6 +5542,21 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
+        # Descobre destino preferido: grupo/canal de análise, se configurado
+        db = SessionLocal()
+        try:
+            me = get_user_by_tid(db, update.effective_user.id)
+        finally:
+            db.close()
+
+        target_chat_id = update.effective_chat.id
+        redirect_notice = False
+        if me and me.role == "manager" and getattr(me, 'channel_id', None):
+            target_chat_id = me.channel_id  # Pode ser grupo ou canal (IDs negativos)
+            # Se perguntou em privado e vamos mandar ao grupo/canal, avisar
+            if update.effective_chat.id != target_chat_id:
+                redirect_notice = True
+
         resp = groq_client.chat.completions.create(
             model=ai_model_name,
             messages=[
@@ -5564,7 +5567,19 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             max_tokens=600,
         )
         answer = resp.choices[0].message.content.strip()
-        await update.message.reply_text(f"🤖 {answer}")
+        header = f"💬 Pergunta de {update.effective_user.first_name or update.effective_user.id}:\n{question}"
+        try:
+            await context.bot.send_message(chat_id=target_chat_id, text=header)
+            await context.bot.send_message(chat_id=target_chat_id, text=f"🤖 {answer}")
+        except Exception as send_err:
+            # Fallback: responde no chat atual
+            await update.message.reply_text(f"🤖 {answer}")
+        else:
+            if redirect_notice:
+                try:
+                    await update.message.reply_text("✅ Resposta enviada no grupo de análise.")
+                except Exception:
+                    pass
     except Exception as e:
         await update.message.reply_text(f"❌ Erro na IA: {str(e)[:200]}")
 
