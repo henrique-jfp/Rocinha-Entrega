@@ -86,6 +86,8 @@ IMPORT_CONFIRMING = 11  # ✅ FASE 3.2: Novo estado para confirmação de import
 PHOTO1, PHOTO2, NAME, DOC, NOTES = range(5)
 # Novo fluxo: seleção de modo e fotos em massa
 MODE_SELECT, MASS_PHOTOS = range(50, 52)
+# Fluxo rápido de insucesso (falha na entrega)
+FAIL_PHOTO, FAIL_NOTES = range(70, 72)
 ADD_DRIVER_TID, ADD_DRIVER_NAME = range(10, 12)
 SEND_SELECT_ROUTE, SEND_SELECT_DRIVER = range(20, 22)
 CONFIG_CHANNEL_SELECT_DRIVER, CONFIG_CHANNEL_ENTER_ID = range(23, 25)
@@ -443,6 +445,11 @@ def _normalize_delivery_argument(raw_arg: str) -> str:
     for prefix in ("entrega_", "iniciar_"):
         if raw_arg.startswith(prefix):
             raw_arg = raw_arg[len(prefix):]
+    # Trata prefixo específico de insucesso: entrega_fail_ -> fail_
+    if raw_arg.startswith("fail_"):
+        return raw_arg
+    if raw_arg.startswith("entrega_fail_"):
+        return "fail_" + raw_arg.split("entrega_fail_", 1)[1]
     return raw_arg
 
 
@@ -533,6 +540,23 @@ async def _process_delivery_argument(update: Update, context: ContextTypes.DEFAU
         except ValueError as err:
             raise DeliveryLinkError("❌ *ID Inválido*\n\nO ID do pacote precisa ser numérico.", 'Markdown') from err
         return await _prompt_delivery_mode(update, context, [package_id])
+
+    # Fluxo rápido de INSUCESSO via deep link: entrega_fail_<id> (normalizado para fail_<id>)
+    if arg.startswith("fail_"):
+        package_id_str = arg.split("fail_", 1)[1]
+        try:
+            package_id = int(package_id_str)
+        except ValueError as err:
+            raise DeliveryLinkError("❌ *ID Inválido*\n\nO ID do pacote precisa ser numérico.", 'Markdown') from err
+        # Inicia conversa pedindo foto
+        context.user_data.clear()
+        context.user_data["fail_package_id"] = package_id
+        if update.message:
+            await update.message.reply_text(
+                "❌ *Insucesso na Entrega*\n\nEnvie uma *foto* do pacote/local para registrar o insucesso.",
+                parse_mode='Markdown'
+            )
+        return FAIL_PHOTO
 
     return None
 
@@ -748,7 +772,7 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "• Gera link de rastreamento\n"
             "• Notifica motorista no Telegram\n\n"
             
-            "*🗺️ /rastrear*\n"
+            "*🗺️ Rastrear:* abra /rotas e toque em '🗺️ Rastrear'\n"
             "Acompanha rotas ativas em tempo real.\n"
             "• GPS ao vivo do motorista\n"
             "• Atualização a cada 30 segundos\n"
@@ -857,7 +881,7 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "   → Use /enviarrota para atribuir\n\n"
             
             "3️⃣ *Rastrear Progresso*\n"
-            "   → Use /rastrear durante o dia\n\n"
+            "   → Rastreie via /rotas (botão '🗺️ Rastrear')\n\n"
             
             "4️⃣ *Receber Notificações*\n"
             "   → Automático a cada entrega\n\n"
@@ -1166,7 +1190,7 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "   └ Link de rastreamento gerado\n"
                 "   └ Notifica motorista no Telegram\n\n"
                 
-                "🗺️ */rastrear*\n"
+                "🗺️ *Rastrear via /rotas*\n"
                 "   └ Acompanha rotas ativas\n"
                 "   └ Localização GPS em tempo real\n"
                 "   └ Atualização a cada 30 segundos\n"
@@ -1277,7 +1301,7 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "3️⃣ *Peça aos motoristas* para usar /configurarcasa\n"
                 "   → Otimização personalizada\n\n"
                 
-                "4️⃣ *Use /rastrear* frequentemente\n"
+                "4️⃣ *Rastreie via /rotas* (botão '🗺️ Rastrear')\n"
                 "   → Acompanhe progresso real\n\n"
                 
                 "5️⃣ *Configure /configurar_canal_análise*\n"
@@ -1297,7 +1321,7 @@ async def cmd_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "↓\n"
                 "🚚 *2. Enviar* rota com /enviarrota\n"
                 "↓\n"
-                "👀 *3. Rastrear* com /rastrear\n"
+                "👀 *3. Rastrear* em /rotas (botão '🗺️ Rastrear')\n"
                 "↓\n"
                 "✅ *4. Receber* notificações automáticas\n"
                 "↓\n"
@@ -4328,6 +4352,117 @@ async def on_mode_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return MODE_SELECT
 
 
+# ==================== FLUXO RÁPIDO: INSUCESSO NA ENTREGA ====================
+async def fail_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.photo:
+        await update.message.reply_text(
+            "⚠️ *Foto Necessária*\n\nEnvie uma foto do pacote/local para registrar o insucesso.",
+            parse_mode='Markdown'
+        )
+        return FAIL_PHOTO
+    photo = update.message.photo[-1]
+    context.user_data["fail_photo_id"] = photo.file_id
+    await update.message.reply_text(
+        "📝 *Observação*\n\nDescreva brevemente o motivo do insucesso (ex.: destinatário ausente, endereço incorreto).",
+        parse_mode='Markdown'
+    )
+    return FAIL_NOTES
+
+
+async def fail_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    notes = (update.message.text or "").strip()
+    context.user_data["fail_notes"] = notes or "Insucesso - sem observação"
+
+    pkg_id = context.user_data.get("fail_package_id")
+    if not pkg_id:
+        await update.message.reply_text(
+            "❌ *Erro Interno*\n\nNão foi possível identificar o pacote.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+
+    db = SessionLocal()
+    try:
+        package = db.get(Package, int(pkg_id))
+        if not package:
+            await update.message.reply_text("❌ Pacote não encontrado.")
+            return ConversationHandler.END
+
+        driver = get_user_by_tid(db, update.effective_user.id)
+        proof = DeliveryProof(
+            package_id=package.id,
+            driver_id=driver.id if driver else None,
+            receiver_name="INSUCESSO",
+            receiver_document="-",
+            notes=context.user_data.get("fail_notes"),
+            photo1_path=context.user_data.get("fail_photo_id"),
+            photo2_path=None,
+        )
+        db.add(proof)
+        package.status = "failed"
+        db.commit()
+
+        # Atualiza status da rota se não houver mais pendentes
+        route_id = package.route_id
+        total = db.query(Package).filter(Package.route_id == route_id).count()
+        delivered = db.query(Package).filter(Package.route_id == route_id, Package.status == "delivered").count()
+        failed = db.query(Package).filter(Package.route_id == route_id, Package.status == "failed").count()
+        remaining = max(0, total - delivered - failed)
+        if total > 0 and remaining == 0:
+            r = db.query(Route).filter(Route.id == route_id).first()
+            if r:
+                r.status = "completed"
+                r.completed_at = datetime.now()
+                db.commit()
+
+        driver_name = driver.full_name or f"ID {driver.telegram_user_id}" if driver else "N/A"
+        await update.message.reply_text(
+            "❌ *Insucesso registrado!*\n\nO pacote foi marcado como *falha na entrega*.",
+            parse_mode='Markdown'
+        )
+
+        # Notifica canal do motorista, se existir
+        if driver and driver.channel_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=driver.channel_id,
+                    text=(
+                        f"❌ Insucesso de Entrega\n\n"
+                        f"Motorista: {driver_name}\n"
+                        f"Pacote: {package.tracking_code}\n"
+                        f"Endereço: {package.address or '-'}\n"
+                        f"Bairro: {package.neighborhood or '-'}\n"
+                        f"Motivo: {context.user_data.get('fail_notes')}\n"
+                        f"Data/Hora: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+                    )
+                )
+                if context.user_data.get("fail_photo_id"):
+                    try:
+                        await context.bot.send_photo(chat_id=driver.channel_id, photo=context.user_data["fail_photo_id"], caption="Insucesso - Foto")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Opcional: notificar gerentes
+        try:
+            await notify_managers(
+                f"❌ Insucesso registrado para pacote {package.tracking_code} (rota {route_id}). Motivo: {context.user_data.get('fail_notes')}",
+                context
+            )
+        except Exception:
+            pass
+
+    finally:
+        db.close()
+        # Limpa dados do fluxo de falha
+        context.user_data.pop("fail_package_id", None)
+        context.user_data.pop("fail_photo_id", None)
+        context.user_data.pop("fail_notes", None)
+
+    return ConversationHandler.END
+
+
 async def mass_photos_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.photo:
         photo = update.message.photo[-1]
@@ -4602,11 +4737,15 @@ async def finalize_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     Package.route_id == route_id,
                     Package.status == "delivered"
                 ).count()
-                remaining_packages = max(0, total_packages - delivered_packages)
+                failed_packages = db.query(Package).filter(
+                    Package.route_id == route_id,
+                    Package.status == "failed"
+                ).count()
+                remaining_packages = max(0, total_packages - delivered_packages - failed_packages)
                 
-                # ✅ FASE 4.2: DETECÇÃO AUTOMÁTICA DE ROTA COMPLETA
-                if total_packages > 0 and delivered_packages == total_packages:
-                    # Todos os pacotes foram entregues!
+                # ✅ FASE 4.2: DETECÇÃO AUTOMÁTICA DE ROTA COMPLETA (sem pendências)
+                if total_packages > 0 and remaining_packages == 0:
+                    # Todos os pacotes estão concluídos (entregues ou insucesso)
                     route_obj.status = "completed"
                     route_obj.completed_at = datetime.now()
                     db.commit()
@@ -5359,59 +5498,6 @@ async def on_back_to_fin_records(update: Update, context: ContextTypes.DEFAULT_T
 
 
 # ==================== COMANDOS UTILITÁRIOS PENDENTES ====================
-async def cmd_rastrear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mostra rotas ativas e botões para abrir o mapa de cada uma (para gerentes)."""
-    db = SessionLocal()
-    try:
-        me = get_user_by_tid(db, update.effective_user.id)
-        if not me or me.role != "manager":
-            await update.message.reply_text(
-                "⛔ *Acesso Negado*\n\nApenas gerentes podem rastrear rotas.",
-                parse_mode='Markdown'
-            )
-            return
-
-        # Rotas em andamento (assigned e não finalizadas)
-        routes = db.query(Route).filter(Route.assigned_to_id.isnot(None)).filter(
-            Route.status.notin_(["completed", "finalized"])  # type: ignore
-        ).order_by(Route.created_at.desc()).all()
-
-        if not routes:
-            await update.message.reply_text(
-                "📭 *Nenhuma rota ativa no momento.*\n\nUse /enviarrota para iniciar uma.",
-                parse_mode='Markdown'
-            )
-            return
-
-        for route in routes[:10]:
-            driver = route.assigned_to
-            driver_name = driver.full_name if driver and driver.full_name else f"ID {getattr(driver, 'telegram_user_id', '—')}"
-            total = db.query(Package).filter(Package.route_id == route.id).count()
-            delivered = db.query(Package).filter(Package.route_id == route.id, Package.status == "delivered").count()
-            pending = total - delivered
-            map_link = None
-            try:
-                if driver and getattr(driver, "telegram_user_id", None):
-                    map_link = f"{BASE_URL}/map/{route.id}/{driver.telegram_user_id}"
-            except Exception:
-                pass
-
-            text = (
-                f"🗺️ *Rastreamento*\n\n"
-                f"📦 Rota: {route.name or route.id}\n"
-                f"👤 Motorista: {driver_name}\n"
-                f"📊 Pendentes: {pending} | Entregues: {delivered} | Total: {total}"
-            )
-            if map_link:
-                await update.message.reply_text(
-                    text + f"\n\n🔗 {map_link}",
-                    parse_mode='Markdown',
-                    disable_web_page_preview=True
-                )
-            else:
-                await update.message.reply_text(text, parse_mode='Markdown')
-    finally:
-        db.close()
 
 
 async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5489,8 +5575,7 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
     app.add_handler(CommandHandler("configurar_canal_analise", cmd_configurar_canal_analise))
     app.add_handler(CommandHandler("meus_registros", cmd_meus_registros))
-    app.add_handler(CommandHandler("rastrear", cmd_rastrear))
-    app.add_handler(CommandHandler("restrear", cmd_rastrear))
+    # /rastrear removido (rastreio via /rotas -> botão "🗺️ Rastrear")
     app.add_handler(CommandHandler("chat_ia", cmd_chat_ia))
     app.add_handler(CommandHandler("chatia", cmd_chat_ia))
     app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record:"))
@@ -5504,7 +5589,11 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
     import_conv = ConversationHandler(
-        entry_points=[CommandHandler("importar", cmd_importar)],
+        entry_points=[
+            CommandHandler("importar", cmd_importar),
+            # Alias para erro comum de digitação
+            CommandHandler("imporar", cmd_importar),
+        ],
         states={
             IMPORT_WAITING_FILE: [MessageHandler(filters.Document.ALL, handle_import_file)],
             IMPORT_CONFIRMING: [
@@ -5597,6 +5686,8 @@ def setup_bot_handlers(app: Application):
                 MessageHandler(filters.PHOTO, mass_photos_add),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, mass_photos_add),
             ],
+            FAIL_PHOTO: [MessageHandler(filters.PHOTO, fail_photo), MessageHandler(filters.TEXT & ~filters.COMMAND, fail_photo)],
+            FAIL_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, fail_notes)],
             PHOTO1: [MessageHandler(filters.PHOTO, photo1)],
             PHOTO2: [MessageHandler(filters.PHOTO, photo2)],
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, recv_name)],

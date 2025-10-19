@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 from typing import List, Optional
 
@@ -304,6 +305,8 @@ def create_app() -> FastAPI:
             if not package:
                 raise HTTPException(status_code=404, detail=f"Pacote {package_id} não encontrado")
             
+            route_id = package.route_id
+            
             print(f"📦 Marcando pacote {package_id} como {body.status}...")
             
             # Atualiza status
@@ -312,6 +315,27 @@ def create_app() -> FastAPI:
             db.add(package)
             db.commit()
             db.refresh(package)
+
+            # Após marcar entregue/falhado, verifica se a rota foi concluída (todos entregues)
+            if route_id is not None and body.status == "delivered":
+                try:
+                    total = db.query(Package).filter(Package.route_id == route_id).count()
+                    delivered = db.query(Package).filter(
+                        Package.route_id == route_id,
+                        Package.status == "delivered"
+                    ).count()
+                    # Marca rota como completed apenas se todos foram entregues e rota ainda não está finalizada
+                    if total > 0 and delivered == total:
+                        route = db.query(Route).filter(Route.id == route_id).first()
+                        if route and route.status != "finalized":
+                            route.status = "completed"
+                            route.completed_at = route.completed_at or datetime.utcnow()
+                            db.add(route)
+                            db.commit()
+                            print(f"✅ Rota {route_id} marcada como COMPLETED (todos os {total} pacotes entregues)")
+                except Exception as e:
+                    # Não falha o endpoint por erro nessa checagem; apenas loga
+                    print(f"⚠️ Falha ao atualizar status da rota {route_id}: {e}")
             
             print(f"✅ Pacote {package_id}: {old_status} → {body.status}")
             

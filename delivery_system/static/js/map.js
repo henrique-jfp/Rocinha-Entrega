@@ -334,8 +334,9 @@
     const hasValid = isFinite(pkg.latitude) && isFinite(pkg.longitude) && Math.abs(pkg.latitude) <= 90 && Math.abs(pkg.longitude) <= 180;
     const nav = hasValid ? `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}` : '#';
     
-    // Link de entrega via comando /entrega dedicado
-    const deliverWeb = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
+  // Links para Telegram: entrega e insucesso
+  const deliverWeb = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
+  const failWeb = `https://t.me/${botUsername}?start=entrega_fail_${pkg.id}`;
     
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';
@@ -352,25 +353,28 @@
           gap: 6px;
           flex-direction: column;
         ">
-          <div style="display: flex; gap: 6px;">
-            <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="flex: 1; text-align: center; ${hasValid ? '' : 'opacity:0.4; pointer-events:none;'}">🧭 Navegar</a>
-            <a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener" style="flex: 1; text-align: center;">✓ Entregar</a>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener" style="
+              flex: 2; text-align: center; background: #10b981; color: white; font-weight: 800; border: 1px solid #059669; border-radius: 10px; padding: 10px; font-size: 14px;">
+              ✓ Entregar
+            </a>
+            <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="
+              flex: 1; text-align: center; ${hasValid ? '' : 'opacity:0.4; pointer-events:none;'}">
+              🧭 Navegar
+            </a>
           </div>
           ${pkg.status === 'pending' ? `
-            <button onclick="markPackageDelivered(${pkg.id})" style="
-              padding: 8px 12px;
-              background: #10b981;
-              color: white;
-              border: none;
-              border-radius: 6px;
-              font-weight: 600;
-              font-size: 13px;
-              cursor: pointer;
-              transition: all 0.2s;
-              width: 100%;
-            " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
-              ✅ Marcar Entregue (Rápido)
-            </button>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <button onclick="markPackageDelivered(${pkg.id})" style="
+                padding: 8px 12px; background: #16a34a; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s; flex:1;" 
+                onmouseover="this.style.background='#15803d'" onmouseout="this.style.background='#16a34a'">
+                ✅ Marcar Entregue (Rápido)
+              </button>
+              <a class="popup-btn fail" href="${failWeb}" target="_blank" rel="noopener" style="
+                flex:1; text-align:center; background:#ef4444; color:white; border-radius:6px; padding:8px 12px; font-weight:600; font-size:13px; text-decoration:none;">
+                ❌ Insucesso
+              </a>
+            </div>
           ` : ''}
         </div>
       </div>`;
@@ -396,7 +400,7 @@
     
     const packagesList = packages.map(pkg => {
       const deliverWeb = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
-      const emoji = getStatusEmoji(pkg.status);
+  const emoji = getStatusEmoji(pkg.status);
       const statusText = getStatusText(pkg.status);
       const addr = (pkg.address || 'Sem endereço').substring(0, 50);
       
@@ -437,6 +441,8 @@
                 text-decoration: none;
                 font-weight: 600;
               " title="Abre Telegram para entrega completa com fotos">Telegram</a>
+              <a href="https://t.me/${botUsername}?start=entrega_fail_${pkg.id}" target="_blank" rel="noopener" style="
+                font-size: 10px; padding: 2px 6px; background: #ef4444; color: white; border-radius: 4px; text-decoration: none; font-weight: 700;">❌ Insucesso</a>
             ` : ''}
           </div>
         </div>
@@ -677,11 +683,34 @@
         margin-left: 4px;
         text-decoration: none;
         display: inline-block;
-        background: #3b82f6;
+        background: #10b981;
         color: white;
         border-radius: 4px;
         font-size: 12px;
         font-weight: 600;
+      `;
+    }
+
+    // Botão de Insucesso (abre fluxo rápido no Telegram)
+    let failBtn = null;
+    if (pkg.status === 'pending') {
+      failBtn = document.createElement('a');
+      failBtn.className = 'fail-btn';
+      failBtn.textContent = '❌ Insucesso';
+      failBtn.title = 'Abrir Telegram para registrar insucesso com foto e observação';
+      failBtn.href = `https://t.me/${botUsername}?start=entrega_fail_${pkg.id}`;
+      failBtn.target = '_blank';
+      failBtn.rel = 'noopener';
+      failBtn.style.cssText = `
+        padding: 6px 10px;
+        margin-left: 4px;
+        text-decoration: none;
+        display: inline-block;
+        background: #ef4444;
+        color: white;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 700;
       `;
     }
 
@@ -690,7 +719,8 @@
     li.appendChild(badge);
     li.appendChild(actionBtn);
     li.appendChild(navBtn);
-    if (deliverBtn) li.appendChild(deliverBtn);
+  if (deliverBtn) li.appendChild(deliverBtn);
+  if (failBtn) li.appendChild(failBtn);
 
     li.addEventListener('click', (e)=>{
       if(e.target.tagName.toLowerCase() === 'a' || e.target.tagName.toLowerCase() === 'button') return;

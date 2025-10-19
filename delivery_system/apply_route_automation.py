@@ -152,7 +152,7 @@ try:
     
     print("\n💡 Próximos passos:")
     print("   1. Reinicie a aplicação (Railway irá reiniciar automaticamente)")
-    print("   2. Teste os comandos: /importar, /enviarrota, /rastrear")
+    print("   2. Teste os comandos: /importar, /enviarrota, /rotas (rastrear via botão)")
     print("   3. Verifique o /relatorio com análise financeira")
 
 except Exception as e:

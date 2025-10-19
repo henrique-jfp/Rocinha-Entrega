@@ -112,7 +112,7 @@ ORDER BY ordinal_position;
 2. ✅ Teste os comandos:
    - `/importar` - Deve funcionar normalmente
    - `/enviarrota` - Deve calcular salário automaticamente
-   - `/rastrear` - Deve mostrar status financeiro
+   - Rastreio disponível via `/rotas` (botão "🗺️ Rastrear")
    - `/relatorio` - Deve gerar análise financeira completa
 
 3. ✅ Monitore os logs:
