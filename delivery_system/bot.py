@@ -2773,6 +2773,9 @@ async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Rota não pode ser finalizada!")
                 return ConversationHandler.END
             
+            # Definir route_name antes de usar em descrições
+            route_name = route.name or f"Rota {route_id}"
+
             # ✅ Salva KM informado
             route.calculated_km = km
             route.extra_expenses = extra_expenses
@@ -2818,8 +2821,7 @@ async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             route.finalized_at = datetime.now()
             db.commit()
             
-            # Busca informações para mensagem final
-            route_name = route.name or f"Rota {route_id}"
+            # Busca informações para mensagem final (route_name já definido)
             driver = db.get(User, route.assigned_to_id) if route.assigned_to_id else None
             driver_name = driver.full_name if driver else "N/A"
             
@@ -2837,8 +2839,10 @@ async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ Todos os registros financeiros foram confirmados!\n\n"
                 f"💡 Use /relatorio para ver o resumo mensal completo."
             )
-            
-            await update.message.reply_text(success_text, parse_mode='Markdown')
+            try:
+                await update.message.reply_text(success_text, parse_mode='Markdown')
+            except Exception:
+                await update.message.reply_text(success_text)
             
             # Limpa contexto
             context.user_data.pop('finalize_route_id', None)
