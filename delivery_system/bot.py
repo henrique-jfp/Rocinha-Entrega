@@ -102,6 +102,8 @@ CONFIG_HOME_SELECT_DRIVER, CONFIG_HOME_LOCATION = range(26, 28)  # Estados para 
 FINALIZE_KM = 60
 FINALIZE_EXTRA_EXPENSE_TYPE, FINALIZE_EXTRA_EXPENSE_VALUE, FINALIZE_EXTRA_EXPENSE_MORE = range(61, 64)
 FINALIZE_EXTRA_INCOME_TYPE, FINALIZE_EXTRA_INCOME_VALUE = range(64, 66)
+# Novo passo: após despesas, perguntar sobre receitas extras
+FINALIZE_ASK_INCOME = 67
 
 # ==================== CACHE SIMPLES PARA RELATÓRIOS ====================
 # Cache em memória para evitar reprocessar dados que mudam pouco
@@ -2661,15 +2663,46 @@ async def finalize_expense_more(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return FINALIZE_EXTRA_EXPENSE_TYPE
     else:
-        # Finaliza despesas e pede KM
+        # Finaliza despesas e pergunta sobre receitas
         expenses_list = context.user_data.get('finalize_expenses_list', [])
         total_expenses = sum(exp['amount'] for exp in expenses_list)
         context.user_data['finalize_extra_expenses'] = total_expenses
-        
+
+        keyboard = [
+            ['➕ Adicionar Receitas', '✅ Pular (sem receitas)']
+        ]
         await update.message.reply_text(
-            "🚗 *Quantos KM você rodou hoje?*\n\n"
-            "_(Considere apenas o deslocamento Ilha ↔ Rocinha)_\n\n"
-            "Digite a kilometragem (ex: 45):",
+            "📝 *Deseja adicionar receitas extras?*\n\n"
+            "Exemplos: gorjeta, taxa adicional...",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
+            parse_mode='Markdown'
+        )
+        return FINALIZE_ASK_INCOME
+
+
+async def finalize_ask_income_handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Decide se usuário quer adicionar receitas extras ou seguir para KM"""
+    resp = update.message.text.strip().lower()
+    if 'receita' in resp or 'adicionar' in resp or 'gorjeta' in resp or 'taxa' in resp:
+        # Direciona para fluxo de receitas extras
+        keyboard = [
+            ['💵 Gorjeta', '📦 Taxa Adicional'],
+            ['💰 Outro'],
+            ['✅ Finalizar (sem receitas extras)']
+        ]
+        await update.message.reply_text(
+            "💵 *Adicionar Receita Extra*\n\nSelecione o tipo:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
+            parse_mode='Markdown'
+        )
+        # Garante que lista esteja presente
+        if 'finalize_income_list' not in context.user_data:
+            context.user_data['finalize_income_list'] = []
+        return FINALIZE_EXTRA_INCOME_TYPE
+    else:
+        # Pula receitas e pede KM
+        await update.message.reply_text(
+            "🚗 *Quantos KM você rodou hoje?*\n\n_(Considere apenas o deslocamento Ilha ↔ Rocinha)_\n\nDigite a kilometragem (ex: 45):",
             parse_mode='Markdown'
         )
         return FINALIZE_KM
@@ -5697,6 +5730,7 @@ def setup_bot_handlers(app: Application):
             FINALIZE_EXTRA_EXPENSE_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_expense_type)],
             FINALIZE_EXTRA_EXPENSE_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_expense_value)],
             FINALIZE_EXTRA_EXPENSE_MORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_expense_more)],
+            FINALIZE_ASK_INCOME: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_ask_income_handle)],
             FINALIZE_EXTRA_INCOME_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_income_type)],
             FINALIZE_EXTRA_INCOME_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_income_value)],
             FINALIZE_KM: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_km_input)],
