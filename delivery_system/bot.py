@@ -37,6 +37,7 @@ from database import (
 from sqlalchemy import func, text, and_, distinct  # ✅ FASE 4.1: Importa utilitários para queries SQL
 import html
 import shutil
+import re
 
 # Logging estruturado
 from shared.logger import logger, log_bot_command
@@ -5769,8 +5770,8 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         sys = (
             "Você é um contador/tesoureiro da empresa e só deve opinar com base nos números fornecidos. "
-            "Responda de forma direta, em pt-BR, com 3-6 bullets objetivos. "
-            "Aponte riscos e oportunidades quando houver, e evite suposições sem dado."
+            "Responda de forma direta, em pt-BR, com 3-6 bullets objetivos, curtos e acionáveis (máx. 20 palavras por bullet). "
+            "Aponte riscos e oportunidades quando houver, e evite suposições sem dado. Não use markdown complexo."
         )
         usr = (
             f"Pergunta: {question}\n\n"
@@ -5786,27 +5787,48 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 temperature=0.2,
                 max_tokens=600,
             )
-            answer = resp.choices[0].message.content.strip()
-        except Exception as e:
-            answer = (
-                "Não consegui acessar a IA agora. Mas aqui estão os números para sua análise manual:\n\n" +
-                _format_report("Mês Atual", k_curr_month) + "\n\n" +
-                _format_report("Mês Anterior", k_prev_month) + "\n\n" +
-                _format_report("Semana Atual", k_curr_week) + "\n\n" +
+            raw = (resp.choices[0].message.content or "").strip()
+        except Exception:
+            raw = (
+                "Não consegui acessar a IA agora. Segue contexto numérico:\n" +
+                _format_report("Mês Atual", k_curr_month) + "\n" +
+                _format_report("Mês Anterior", k_prev_month) + "\n" +
+                _format_report("Semana Atual", k_curr_week) + "\n" +
                 _format_report("Semana Passada", k_prev_week)
             )
 
-        header = f"💬 <b>Pergunta de</b> <code>{esc(update.effective_user.first_name or update.effective_user.id)}</code>:\n{esc(question)}"
+        def md_to_html_compact(text: str) -> str:
+            # Normaliza quebras e remove espaçamentos excessivos
+            t = text.replace('\r', '')
+            # Converte **bold** simples
+            t = re.sub(r"\*\*([^*]+)\*\*", lambda m: f"<b>{html.escape(m.group(1))}</b>", t)
+            # Itálico simples *x*
+            t = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", lambda m: f"<i>{html.escape(m.group(1))}</i>", t)
+            # Transformar bullets que começam com - ou * em '• '
+            lines = []
+            for line in t.split('\n'):
+                s = line.strip()
+                if s.startswith('- ') or s.startswith('* '):
+                    content = s[2:].strip()
+                    lines.append('• ' + html.escape(content))
+                elif s:
+                    lines.append(html.escape(s))
+            # Limita a 6 bullets/sentenças curtas
+            if len(lines) > 6:
+                lines = lines[:6]
+            return '\n'.join(lines)
+
+        compact = md_to_html_compact(raw)
+        title = "🧮 <b>Parecer Financeiro</b>"
+        qline = f"🗣️ <i>{esc(question)}</i>"
+        final_msg = f"{title}\n{qline}\n\n{compact}"
         try:
-            await context.bot.send_message(chat_id=target_chat_id, text=header, parse_mode='HTML')
-            await context.bot.send_message(chat_id=target_chat_id, text=f"📊 <b>Contexto numérico pronto.</b>\n🤖 {esc(answer)}", parse_mode='HTML')
+            await context.bot.send_message(chat_id=target_chat_id, text=final_msg, parse_mode='HTML')
         except Exception:
-            await update.message.reply_text(f"🤖 {answer}")
+            await update.message.reply_text(re.sub('<[^>]+>', '', final_msg))
     finally:
         db.close()
 
-
-# ==================== RESET SEGURO DA EMPRESA ====================
 
 async def cmd_resetar_empresa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
