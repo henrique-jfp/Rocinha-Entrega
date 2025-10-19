@@ -5691,52 +5691,57 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def _format_report(title: str, k: dict) -> str:
         eb_items = []
         for t, v in sorted(k.get("expense_breakdown", {}).items()):
-            eb_items.append(f"_{t}_: R$ {v:,.2f}")
+            eb_items.append(f"<i>{html.escape(t)}</i>: R$ {v:,.2f}")
         eb = " · ".join(eb_items) or "-"
         return (
-            f"*{title}*\n"
-            f"📅 *Período:* `{k['period']['start']}` a `{k['period']['end']}`\n"
-            f"💵 *Receita:* R$ {k['income_total']:,.2f}   ·   🧾 *Despesas:* R$ {k['expense_total']:,.2f}\n"
-            f"💚 *Lucro:* R$ {k['profit']:,.2f}   ·   🚘 *KM:* {k['km_total']:,.0f}\n"
-            f"🧩 *Rotas:* concl\\. {k['routes_completed']} · final\\. {k['routes_finalized']}\n"
-            f"📦 *Entregues:* {k['delivered']} · ❌ *Falhas:* {k['failed']} · ✅ *Sucesso:* {k['success_rate']:.1f}%\n"
-            f"📈 *Médias por rota:* Receita R$ {k['avg_income_per_route']:,.2f} · Despesa R$ {k['avg_expense_per_route']:,.2f}\n"
-            f"🏷️ *Despesas por tipo:* {eb}"
+            f"<b>{html.escape(title)}</b>\n\n"
+            f"📅 <b>Período:</b> {html.escape(k['period']['start'])} a {html.escape(k['period']['end'])}\n\n"
+            f"💵 <b>Receita:</b> R$ {k['income_total']:,.2f}\n"
+            f"🧾 <b>Despesas:</b> R$ {k['expense_total']:,.2f}\n"
+            f"💚 <b>Lucro:</b> R$ {k['profit']:,.2f}\n"
+            f"🚘 <b>KM Total:</b> {k['km_total']:,.0f} km\n\n"
+            f"🧩 <b>Rotas:</b> {k['routes_completed']} concluídas · {k['routes_finalized']} finalizadas\n"
+            f"📦 <b>Entregas:</b> {k['delivered']} entregues · {k['failed']} falhas\n"
+            f"✅ <b>Taxa de Sucesso:</b> {k['success_rate']:.1f}%\n\n"
+            f"📈 <b>Médias por rota:</b>\n"
+            f"   • Receita: R$ {k['avg_income_per_route']:,.2f}\n"
+            f"   • Despesa: R$ {k['avg_expense_per_route']:,.2f}\n\n"
+            f"🏷️ <b>Despesas por tipo:</b> {eb}"
         )
 
     def _format_compare(title: str, a_label: str, a: dict, b_label: str, b: dict) -> str:
         def delta(v1, v2):
             try:
                 if v2 == 0:
-                    return "(\\+∞)" if v1 > 0 else "(0)"
+                    return "(+∞)" if v1 > 0 else "(0)"
                 p = (v1 - v2) / v2 * 100
                 arrow = "⬆️" if p > 0 else ("⬇️" if p < 0 else "➖")
                 return f"{arrow} {p:+.1f}%"
             except Exception:
                 return ""
 
-        lines = [f"*{title}*"]
+        lines = [f"<b>{html.escape(title)}</b>"]
         metrics = [
-            ("Receita", a['income_total'], b['income_total']),
-            ("Despesas", a['expense_total'], b['expense_total']),
-            ("Lucro", a['profit'], b['profit']),
-            ("KM", a['km_total'], b['km_total']),
-            ("Rotas concl\\.", a['routes_completed'], b['routes_completed']),
-            ("Entregues", a['delivered'], b['delivered']),
-            ("Falhas", a['failed'], b['failed']),
-            ("Sucesso %", a['success_rate'], b['success_rate']),
+            ("💵 Receita", a['income_total'], b['income_total']),
+            ("🧾 Despesas", a['expense_total'], b['expense_total']),
+            ("💚 Lucro", a['profit'], b['profit']),
+            ("🚘 KM", a['km_total'], b['km_total']),
+            ("🧩 Rotas concl.", a['routes_completed'], b['routes_completed']),
+            ("📦 Entregues", a['delivered'], b['delivered']),
+            ("❌ Falhas", a['failed'], b['failed']),
+            ("✅ Sucesso %", a['success_rate'], b['success_rate']),
         ]
-        lines.append(f"🅰️ *{a_label}*: `{a['period']['start']}` a `{a['period']['end']}`")
-        lines.append(f"🅱️ *{b_label}*: `{b['period']['start']}` a `{b['period']['end']}`")
+        lines.append(f"\n🅰️ <b>{html.escape(a_label)}:</b> <code>{html.escape(a['period']['start'])}</code> a <code>{html.escape(a['period']['end'])}</code>")
+        lines.append(f"🅱️ <b>{html.escape(b_label)}:</b> <code>{html.escape(b['period']['start'])}</code> a <code>{html.escape(b['period']['end'])}</code>\n")
         for name, va, vb in metrics:
             if isinstance(va, (int, float)) and isinstance(vb, (int, float)):
                 comp = delta(va, vb)
-                if name in ("Receita", "Despesas", "Lucro", "Média Receita/Rota", "Média Despesa/Rota"):
-                    lines.append(f"• *{name}:* R$ {va:,.2f} vs R$ {vb:,.2f} _{comp}_")
-                elif name == "Sucesso %":
-                    lines.append(f"• *{name}:* {va:.1f}% vs {vb:.1f}% _{comp}_")
+                if name in ("💵 Receita", "🧾 Despesas", "💚 Lucro", "Média Receita/Rota", "Média Despesa/Rota"):
+                    lines.append(f"• <b>{html.escape(name)}:</b> R$ {va:,.2f} vs R$ {vb:,.2f} <i>{html.escape(comp)}</i>")
+                elif name == "✅ Sucesso %":
+                    lines.append(f"• <b>{html.escape(name)}:</b> {va:.1f}% vs {vb:.1f}% <i>{html.escape(comp)}</i>")
                 else:
-                    lines.append(f"• *{name}:* {va} vs {vb} _{comp}_")
+                    lines.append(f"• <b>{html.escape(name)}:</b> {va} vs {vb} <i>{html.escape(comp)}</i>")
         return "\n".join(lines)
 
     question = _extract_command_argument(update, context)
@@ -5771,7 +5776,7 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             start, end = _week_range(now, offset_weeks=-1 if last else 0)
             k = _kpis(db, start, end)
             report = _format_report("📊 Relatório Semanal", k)
-            await context.bot.send_message(chat_id=target_chat_id, text=report, parse_mode='MarkdownV2')
+            await context.bot.send_message(chat_id=target_chat_id, text=report, parse_mode='HTML')
             return
 
         # 2) Comparação entre semanas (atual vs passada)
@@ -5781,7 +5786,7 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             a = _kpis(db, a_start, a_end)
             b = _kpis(db, b_start, b_end)
             comp = _format_compare("📈 Comparação: Semana Atual vs Semana Passada", "Semana Atual", a, "Semana Passada", b)
-            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='MarkdownV2')
+            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='HTML')
             return
 
         # 3) Comparação entre meses (atual vs anterior)
@@ -5791,7 +5796,7 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             a = _kpis(db, a_start, a_end)
             b = _kpis(db, b_start, b_end)
             comp = _format_compare("📈 Comparação: Mês Atual vs Mês Anterior", "Mês Atual", a, "Mês Anterior", b)
-            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='MarkdownV2')
+            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='HTML')
             return
 
         # 4) Conselho/Opinião com base nos números (usa IA com KPIs como contexto)
@@ -5820,21 +5825,30 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         sys = (
-            "Você é um CFO (diretor financeiro) experiente de uma empresa de entregas. "
-            "Sua missão é dar análises estratégicas completas e acionáveis com base nos dados fornecidos. "
-            "Foque em: (1) Tendências e padrões (crescimento/queda receita, despesas, lucro), "
-            "(2) Comparações entre períodos (semanal, mensal), "
-            "(3) Riscos operacionais e financeiros, "
-            "(4) Oportunidades de otimização (rotas, salários, custos), "
-            "(5) Projeções e recomendações para os próximos períodos. "
-            "Responda em pt-BR, de forma direta mas profunda, em 8-15 bullets curtos (máx. 25 palavras cada). "
-            "Use negrito em **termos-chave** e itálico em *valores importantes*. "
-            "Mostre domínio dos números e não hesite em apontar alertas vermelhos ou bandeiras verdes. "
-            "Evite generalizações sem dado. Seja assertivo e confiável."
+            "Você é um consultor financeiro amigável e experiente de uma empresa de entregas. "
+            "Seu trabalho é EXPLICAR os números, dar CONTEXTO e sugerir AÇÕES PRÁTICAS — não só listar dados.\n\n"
+            "ESTRUTURA OBRIGATÓRIA (use exatamente esses títulos):\n"
+            "📌 RESUMO: (1-2 frases) O que os números dizam sobre a saúde do negócio agora.\n"
+            "🔍 ANÁLISE: (3-5 pontos) Por que isso está acontecendo? Tendências, comparações, causas.\n"
+            "⚠️ ALERTAS: (1-3 pontos) Riscos ou problemas que merecem atenção imediata.\n"
+            "✅ RECOMENDAÇÕES: (3-5 ações concretas) O que fazer agora? Seja específico e prático.\n\n"
+            "Tom: Consultivo, direto, amigável. Fale como se estivesse conversando com o dono da empresa tomando café.\n"
+            "Use **negrito** em termos importantes e dê exemplos reais quando possível.\n"
+            "Evite jargões complexos. Seja humano, não robotizado.\n"
+            "Tamanho: 10-18 linhas no total (não seja curto demais)."
         )
         usr = (
-            f"Pergunta/Pedido: {question}\n\n"
-            f"Dados detalhados (JSON):\n{json.dumps(context_blob, indent=2, ensure_ascii=False)}"
+            f"Contexto: Empresa de entregas na Rocinha (RJ), modelo micro-hub com entregadores locais a pé. "
+            f"Salário entregador: R$ 100-150/dia. Capacidade: ~30 pacotes/dia por pessoa. "
+            f"Objetivo: escalar de 1 para 4 entregadores, depois conseguir contrato com Shopee.\n\n"
+            f"Pergunta do dono: {question}\n\n"
+            f"Dados financeiros e operacionais (JSON):\n"
+            f"{json.dumps(context_blob, indent=2, ensure_ascii=False)}\n\n"
+            f"Instruções extras:\n"
+            f"- Sempre dê números concretos (ex: 'economizar R$ X', 'aumentar Y%', 'contratar Z pessoas').\n"
+            f"- Relacione os dados com a realidade da Rocinha (favela, entrega a pé, micro-hub).\n"
+            f"- Se for sobre contratar, calcule viabilidade (custo vs receita extra esperada).\n"
+            f"- Se for sobre despesas, sugira otimizações realistas para o contexto local."
         )
         try:
             resp = groq_client.chat.completions.create(
@@ -5843,42 +5857,48 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     {"role": "system", "content": sys},
                     {"role": "user", "content": usr},
                 ],
-                temperature=0.2,
-                max_tokens=1200,
+                temperature=0.3,
+                max_tokens=1500,
             )
             raw = (resp.choices[0].message.content or "").strip()
-        except Exception:
+        except Exception as e:
             raw = (
-                "Não consegui acessar a IA agora. Segue contexto numérico:\n\n" +
+                f"⚠️ Não consegui acessar a IA agora ({e}). Segue contexto numérico:\n\n" +
                 _format_report("Mês Atual", k_curr_month) + "\n\n" +
                 _format_report("Mês Anterior", k_prev_month) + "\n\n" +
                 _format_report("Semana Atual", k_curr_week) + "\n\n" +
                 _format_report("Semana Passada", k_prev_week)
             )
 
-        # Limpa e formata a resposta em Markdown limpo
-        def clean_md(text: str) -> str:
+        # Formata a resposta para HTML
+        def format_advice(text: str) -> str:
             # Remove espaços excessivos, normaliza quebras
             t = text.replace('\r', '').strip()
-            # Substitui bullets de hífen por bullets reais
+            # Converte Markdown para HTML
+            t = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', t)  # negrito
+            t = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', t)  # itálico
+            # Detecta seções com emoji e deixa em negrito
+            t = re.sub(r'^(📌 RESUMO:|🔍 ANÁLISE:|⚠️ ALERTAS:|✅ RECOMENDAÇÕES:)', r'<b>\1</b>', t, flags=re.MULTILINE)
+            # Normaliza bullets
             lines = []
             for line in t.split('\n'):
                 s = line.strip()
                 if s.startswith('- ') or s.startswith('* '):
-                    lines.append('• ' + s[2:].strip())
+                    lines.append('  • ' + s[2:].strip())
                 elif s:
                     lines.append(s)
             return '\n'.join(lines)
 
-        answer = clean_md(raw)
+        answer = format_advice(raw)
         # Monta mensagem final com cabeçalho e corpo
-        header = f"🧮 *Parecer Financeiro (CFO)*\n� _{question}_\n"
+        header = f"<b>🧮 Parecer Financeiro</b>\n<i>{html.escape(question)}</i>\n"
         final_msg = header + "\n" + answer
         try:
-            await context.bot.send_message(chat_id=target_chat_id, text=final_msg, parse_mode='Markdown')
-        except Exception:
-            # Fallback sem formatação se Markdown falhar
-            await update.message.reply_text(final_msg.replace('*', '').replace('_', ''))
+            await context.bot.send_message(chat_id=target_chat_id, text=final_msg, parse_mode='HTML')
+        except Exception as e:
+            # Fallback sem formatação se HTML falhar
+            plain = final_msg.replace('<b>', '').replace('</b>', '').replace('<i>', '').replace('</i>', '').replace('<code>', '').replace('</code>', '')
+            await update.message.reply_text(plain)
     finally:
         db.close()
 
