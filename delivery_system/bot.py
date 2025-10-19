@@ -34,7 +34,7 @@ from database import (
     SessionLocal, init_db, User, Route, Package, DeliveryProof,
     Expense, Income, Mileage, AIReport, LinkToken
 )
-from sqlalchemy import func, text  # ✅ FASE 4.1: Importa func para queries SQL
+from sqlalchemy import func, text, and_, distinct  # ✅ FASE 4.1: Importa utilitários para queries SQL
 
 # Logging estruturado
 from shared.logger import logger, log_bot_command
@@ -5537,54 +5537,276 @@ async def on_back_to_fin_records(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Perguntas rápidas para IA Groq com contexto básico. Se GROQ_API_KEY faltar, avisa."""
+    """/chat_ia versão 'contador/tesoureiro':
+    - Relatório semanal (atual ou semana passada)
+    - Comparação entre semanas e entre meses
+    - Conselho/opinião baseado em KPIs reais (Income, Expense, Mileage, Deliveries)
+    """
+
+    def _week_range(ref: datetime, offset_weeks: int = 0):
+        # Considera semana de segunda a domingo
+        base = ref.replace(hour=0, minute=0, second=0, microsecond=0)
+        weekday = base.weekday()  # 0=segunda
+        monday = base.replace() - pd.Timedelta(days=weekday) + pd.Timedelta(weeks=offset_weeks)
+        sunday = monday + pd.Timedelta(days=6)
+        return monday.date(), sunday.date()
+
+    def _month_range(ref: datetime, offset_months: int = 0):
+        year = ref.year
+        month = ref.month + offset_months
+        while month > 12:
+            month -= 12
+            year += 1
+        while month < 1:
+            month += 12
+            year -= 1
+        start = datetime(year, month, 1)
+        if month == 12:
+            end = datetime(year + 1, 1, 1) - pd.Timedelta(days=1)
+        else:
+            end = datetime(year, month + 1, 1) - pd.Timedelta(days=1)
+        return start.date(), end.date()
+
+    def _kpis(db, start_date, end_date):
+        # Totais de receitas e despesas
+        income_total = db.query(func.coalesce(func.sum(Income.amount), 0.0)).filter(
+            and_(Income.date >= start_date, Income.date <= end_date)
+        ).scalar() or 0.0
+
+        expense_total = db.query(func.coalesce(func.sum(Expense.amount), 0.0)).filter(
+            and_(Expense.date >= start_date, Expense.date <= end_date)
+        ).scalar() or 0.0
+
+        # Quebra por tipo de despesa
+        expense_rows = db.query(Expense.type, func.coalesce(func.sum(Expense.amount), 0.0)).filter(
+            and_(Expense.date >= start_date, Expense.date <= end_date)
+        ).group_by(Expense.type).all()
+        expense_breakdown = {t: float(v or 0.0) for (t, v) in expense_rows}
+
+        # KM total
+        km_total = db.query(func.coalesce(func.sum(Mileage.km_total), 0.0)).filter(
+            and_(Mileage.date >= start_date, Mileage.date <= end_date)
+        ).scalar() or 0.0
+
+        # Rotas
+        routes_completed = db.query(func.count(Route.id)).filter(
+            and_(Route.completed_at.isnot(None), func.date(Route.completed_at) >= start_date, func.date(Route.completed_at) <= end_date)
+        ).scalar() or 0
+        routes_finalized = db.query(func.count(Route.id)).filter(
+            and_(Route.finalized_at.isnot(None), func.date(Route.finalized_at) >= start_date, func.date(Route.finalized_at) <= end_date)
+        ).scalar() or 0
+
+        # Entregas e insucessos por DeliveryProof no período (distintos por pacote)
+        delivered_count = db.query(func.count(distinct(DeliveryProof.package_id))).join(Package, Package.id == DeliveryProof.package_id).filter(
+            and_(func.date(DeliveryProof.timestamp) >= start_date, func.date(DeliveryProof.timestamp) <= end_date, Package.status == 'delivered')
+        ).scalar() or 0
+        failed_count = db.query(func.count(distinct(DeliveryProof.package_id))).join(Package, Package.id == DeliveryProof.package_id).filter(
+            and_(func.date(DeliveryProof.timestamp) >= start_date, func.date(DeliveryProof.timestamp) <= end_date, Package.status == 'failed')
+        ).scalar() or 0
+
+        total_income = float(income_total)
+        total_expense = float(expense_total)
+        profit = total_income - total_expense
+        total_deliveries = delivered_count + failed_count
+        success_rate = (delivered_count / total_deliveries * 100.0) if total_deliveries > 0 else 0.0
+        avg_income_per_route = (total_income / routes_completed) if routes_completed else 0.0
+        avg_expense_per_route = (total_expense / routes_completed) if routes_completed else 0.0
+
+        return {
+            "period": {"start": str(start_date), "end": str(end_date)},
+            "income_total": round(total_income, 2),
+            "expense_total": round(total_expense, 2),
+            "profit": round(profit, 2),
+            "expense_breakdown": expense_breakdown,
+            "km_total": round(float(km_total), 2),
+            "routes_completed": int(routes_completed),
+            "routes_finalized": int(routes_finalized),
+            "delivered": int(delivered_count),
+            "failed": int(failed_count),
+            "success_rate": round(success_rate, 2),
+            "avg_income_per_route": round(avg_income_per_route, 2),
+            "avg_expense_per_route": round(avg_expense_per_route, 2),
+        }
+
+    def _format_report(title: str, k: dict) -> str:
+        eb = ", ".join([f"{t}: R$ {v:,.2f}" for t, v in sorted(k.get("expense_breakdown", {}).items())]) or "-"
+        return (
+            f"{title}\n"
+            f"Período: {k['period']['start']} a {k['period']['end']}\n"
+            f"Receita: R$ {k['income_total']:,.2f}\n"
+            f"Despesas: R$ {k['expense_total']:,.2f}\n"
+            f"Lucro: R$ {k['profit']:,.2f}\n"
+            f"KM: {k['km_total']:,.0f}\n"
+            f"Rotas concluídas: {k['routes_completed']} | finalizadas: {k['routes_finalized']}\n"
+            f"Entregues: {k['delivered']} | Falhas: {k['failed']} | Sucesso: {k['success_rate']:.1f}%\n"
+            f"Média Receita/Rota: R$ {k['avg_income_per_route']:,.2f} | Média Despesa/Rota: R$ {k['avg_expense_per_route']:,.2f}\n"
+            f"Despesas por tipo: {eb}"
+        )
+
+    def _format_compare(title: str, a_label: str, a: dict, b_label: str, b: dict) -> str:
+        def delta(v1, v2):
+            try:
+                if v2 == 0:
+                    return "(+∞)" if v1 > 0 else "(0)"
+                p = (v1 - v2) / v2 * 100
+                arrow = "⬆️" if p > 0 else ("⬇️" if p < 0 else "➖")
+                return f"{arrow} {p:+.1f}%"
+            except Exception:
+                return ""
+
+        lines = [title]
+        metrics = [
+            ("Receita", a['income_total'], b['income_total']),
+            ("Despesas", a['expense_total'], b['expense_total']),
+            ("Lucro", a['profit'], b['profit']),
+            ("KM", a['km_total'], b['km_total']),
+            ("Rotas concl.", a['routes_completed'], b['routes_completed']),
+            ("Entregues", a['delivered'], b['delivered']),
+            ("Falhas", a['failed'], b['failed']),
+            ("Sucesso %", a['success_rate'], b['success_rate']),
+        ]
+        lines.append(f"A: {a_label} ({a['period']['start']} a {a['period']['end']})")
+        lines.append(f"B: {b_label} ({b['period']['start']} a {b['period']['end']})")
+        for name, va, vb in metrics:
+            if isinstance(va, (int, float)) and isinstance(vb, (int, float)):
+                comp = delta(va, vb)
+                if name in ("Receita", "Despesas", "Lucro", "Média Receita/Rota", "Média Despesa/Rota"):
+                    lines.append(f"• {name}: {va:,.2f} vs {vb:,.2f} {comp}")
+                elif name == "Sucesso %":
+                    lines.append(f"• {name}: {va:.1f}% vs {vb:.1f}% {comp}")
+                else:
+                    lines.append(f"• {name}: {va} vs {vb} {comp}")
+        return "\n".join(lines)
+
     question = _extract_command_argument(update, context)
     if not question:
         await update.message.reply_text(
-            "💬 *Chat IA*\n\nEnvie a pergunta junto do comando. Exemplo:\n/chat_ia Quantos pacotes entregues este mês?",
+            "💬 *Chat IA Financeiro*\n\nExemplos:\n" \
+            "• /chat_ia relatório semanal\n" \
+            "• /chat_ia comparação entre semanas\n" \
+            "• /chat_ia comparação entre meses\n" \
+            "• /chat_ia Tenho uma ideia para reduzir custos com combustível, o que acha?",
             parse_mode='Markdown'
         )
         return
 
-    if not groq_client or not ai_model_name:
-        await update.message.reply_text(
-            "⚠️ IA indisponível. Configure GROQ_API_KEY para usar /chat_ia.",
-            parse_mode='Markdown'
-        )
-        return
-
+    # Descobre destino preferido: grupo/canal de análise, se configurado
+    db = SessionLocal()
     try:
-        # Descobre destino preferido: grupo/canal de análise, se configurado
-        db = SessionLocal()
-        try:
-            me = get_user_by_tid(db, update.effective_user.id)
-        finally:
-            db.close()
-
+        me = get_user_by_tid(db, update.effective_user.id)
         target_chat_id = update.effective_chat.id
         redirect_notice = False
         if me and me.role == "manager" and getattr(me, 'channel_id', None):
-            target_chat_id = me.channel_id  # Pode ser grupo ou canal (IDs negativos)
-            # Se perguntou em privado e vamos mandar ao grupo/canal, avisar
+            target_chat_id = me.channel_id
             if update.effective_chat.id != target_chat_id:
                 redirect_notice = True
 
-        resp = groq_client.chat.completions.create(
-            model=ai_model_name,
-            messages=[
-                {"role": "system", "content": "Você é um assistente de operações de logística. Responda em pt-BR de forma objetiva."},
-                {"role": "user", "content": question},
-            ],
-            temperature=0.3,
-            max_tokens=600,
+        qlow = question.lower()
+        now = datetime.now()
+
+        # 1) Relatório semanal (atual ou passado)
+        if "relatório semanal" in qlow or "relatorio semanal" in qlow or "semanal" in qlow:
+            last = ("passada" in qlow) or ("anterior" in qlow)
+            start, end = _week_range(now, offset_weeks=-1 if last else 0)
+            k = _kpis(db, start, end)
+            report = _format_report("📊 Relatório Semanal", k)
+            await context.bot.send_message(chat_id=target_chat_id, text=report)
+            if redirect_notice:
+                try:
+                    await update.message.reply_text("✅ Relatório enviado no grupo de análise.")
+                except Exception:
+                    pass
+            return
+
+        # 2) Comparação entre semanas (atual vs passada)
+        if "comparação entre semanas" in qlow or "comparacao entre semanas" in qlow or "comparar semanas" in qlow:
+            a_start, a_end = _week_range(now, 0)
+            b_start, b_end = _week_range(now, -1)
+            a = _kpis(db, a_start, a_end)
+            b = _kpis(db, b_start, b_end)
+            comp = _format_compare("📈 Comparação: Semana Atual vs Semana Passada", "Semana Atual", a, "Semana Passada", b)
+            await context.bot.send_message(chat_id=target_chat_id, text=comp)
+            if redirect_notice:
+                try:
+                    await update.message.reply_text("✅ Comparação enviada no grupo de análise.")
+                except Exception:
+                    pass
+            return
+
+        # 3) Comparação entre meses (atual vs anterior)
+        if "comparação entre meses" in qlow or "comparacao entre meses" in qlow or "comparar meses" in qlow:
+            a_start, a_end = _month_range(now, 0)
+            b_start, b_end = _month_range(now, -1)
+            a = _kpis(db, a_start, a_end)
+            b = _kpis(db, b_start, b_end)
+            comp = _format_compare("📈 Comparação: Mês Atual vs Mês Anterior", "Mês Atual", a, "Mês Anterior", b)
+            await context.bot.send_message(chat_id=target_chat_id, text=comp)
+            if redirect_notice:
+                try:
+                    await update.message.reply_text("✅ Comparação enviada no grupo de análise.")
+                except Exception:
+                    pass
+            return
+
+        # 4) Conselho/Opinião com base nos números (usa IA com KPIs como contexto)
+        # KPIs recentes (mês atual, mês anterior, últimas 4 semanas)
+        if not groq_client or not ai_model_name:
+            await update.message.reply_text(
+                "⚠️ IA indisponível para aconselhamento. Configure GROQ_API_KEY.",
+                parse_mode='Markdown'
+            )
+            return
+
+        cm_start, cm_end = _month_range(now, 0)
+        pm_start, pm_end = _month_range(now, -1)
+        cw_start, cw_end = _week_range(now, 0)
+        pw_start, pw_end = _week_range(now, -1)
+        k_curr_month = _kpis(db, cm_start, cm_end)
+        k_prev_month = _kpis(db, pm_start, pm_end)
+        k_curr_week = _kpis(db, cw_start, cw_end)
+        k_prev_week = _kpis(db, pw_start, pw_end)
+
+        context_blob = {
+            "current_month": k_curr_month,
+            "previous_month": k_prev_month,
+            "current_week": k_curr_week,
+            "previous_week": k_prev_week,
+        }
+
+        sys = (
+            "Você é um contador/tesoureiro da empresa e só deve opinar com base nos números fornecidos. "
+            "Responda de forma direta, em pt-BR, com 3-6 bullets objetivos. "
+            "Aponte riscos e oportunidades quando houver, e evite suposições sem dado."
         )
-        answer = resp.choices[0].message.content.strip()
+        usr = (
+            f"Pergunta: {question}\n\n"
+            f"Métricas (JSON): {context_blob}"
+        )
+        try:
+            resp = groq_client.chat.completions.create(
+                model=ai_model_name,
+                messages=[
+                    {"role": "system", "content": sys},
+                    {"role": "user", "content": usr},
+                ],
+                temperature=0.2,
+                max_tokens=600,
+            )
+            answer = resp.choices[0].message.content.strip()
+        except Exception as e:
+            answer = (
+                "Não consegui acessar a IA agora. Mas aqui estão os números para sua análise manual:\n\n" +
+                _format_report("Mês Atual", k_curr_month) + "\n\n" +
+                _format_report("Mês Anterior", k_prev_month) + "\n\n" +
+                _format_report("Semana Atual", k_curr_week) + "\n\n" +
+                _format_report("Semana Passada", k_prev_week)
+            )
+
         header = f"💬 Pergunta de {update.effective_user.first_name or update.effective_user.id}:\n{question}"
         try:
             await context.bot.send_message(chat_id=target_chat_id, text=header)
-            await context.bot.send_message(chat_id=target_chat_id, text=f"🤖 {answer}")
-        except Exception as send_err:
-            # Fallback: responde no chat atual
+            await context.bot.send_message(chat_id=target_chat_id, text=f"📊 Contexto numérico pronto.\n🤖 {answer}")
+        except Exception:
             await update.message.reply_text(f"🤖 {answer}")
         else:
             if redirect_notice:
@@ -5592,8 +5814,8 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text("✅ Resposta enviada no grupo de análise.")
                 except Exception:
                     pass
-    except Exception as e:
-        await update.message.reply_text(f"❌ Erro na IA: {str(e)[:200]}")
+    finally:
+        db.close()
 
 
 async def _post_init(application):
