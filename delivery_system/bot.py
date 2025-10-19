@@ -35,6 +35,8 @@ from database import (
     Expense, Income, Mileage, AIReport, LinkToken
 )
 from sqlalchemy import func, text, and_, distinct  # ✅ FASE 4.1: Importa utilitários para queries SQL
+import html
+import shutil
 
 # Logging estruturado
 from shared.logger import logger, log_bot_command
@@ -104,6 +106,9 @@ FINALIZE_EXTRA_EXPENSE_TYPE, FINALIZE_EXTRA_EXPENSE_VALUE, FINALIZE_EXTRA_EXPENS
 FINALIZE_EXTRA_INCOME_TYPE, FINALIZE_EXTRA_INCOME_VALUE = range(64, 66)
 # Novo passo: após despesas, perguntar sobre receitas extras
 FINALIZE_ASK_INCOME = 67
+
+# Estado para reset seguro da base
+RESET_CONFIRM = 80
 
 # ==================== CACHE SIMPLES PARA RELATÓRIOS ====================
 # Cache em memória para evitar reprocessar dados que mudam pouco
@@ -5567,6 +5572,9 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             end = datetime(year, month + 1, 1) - pd.Timedelta(days=1)
         return start.date(), end.date()
 
+    def esc(s: str) -> str:
+        return html.escape(str(s or "")).replace("\n", " ")
+
     def _kpis(db, start_date, end_date):
         # Totais de receitas e despesas
         income_total = db.query(func.coalesce(func.sum(Income.amount), 0.0)).filter(
@@ -5629,18 +5637,19 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
     def _format_report(title: str, k: dict) -> str:
-        eb = ", ".join([f"{t}: R$ {v:,.2f}" for t, v in sorted(k.get("expense_breakdown", {}).items())]) or "-"
+        eb_items = []
+        for t, v in sorted(k.get("expense_breakdown", {}).items()):
+            eb_items.append(f"<code>{esc(t)}</code>: R$ {v:,.2f}")
+        eb = " · ".join(eb_items) or "-"
         return (
-            f"{title}\n"
-            f"Período: {k['period']['start']} a {k['period']['end']}\n"
-            f"Receita: R$ {k['income_total']:,.2f}\n"
-            f"Despesas: R$ {k['expense_total']:,.2f}\n"
-            f"Lucro: R$ {k['profit']:,.2f}\n"
-            f"KM: {k['km_total']:,.0f}\n"
-            f"Rotas concluídas: {k['routes_completed']} | finalizadas: {k['routes_finalized']}\n"
-            f"Entregues: {k['delivered']} | Falhas: {k['failed']} | Sucesso: {k['success_rate']:.1f}%\n"
-            f"Média Receita/Rota: R$ {k['avg_income_per_route']:,.2f} | Média Despesa/Rota: R$ {k['avg_expense_per_route']:,.2f}\n"
-            f"Despesas por tipo: {eb}"
+            f"{esc(title)}\n"
+            f"📅 <b>Período:</b> <code>{esc(k['period']['start'])}</code> a <code>{esc(k['period']['end'])}</code>\n"
+            f"💵 <b>Receita:</b> R$ {k['income_total']:,.2f}   ·   🧾 <b>Despesas:</b> R$ {k['expense_total']:,.2f}\n"
+            f"💚 <b>Lucro:</b> R$ {k['profit']:,.2f}   ·   🚘 <b>KM:</b> {k['km_total']:,.0f}\n"
+            f"🧩 <b>Rotas:</b> concl. {k['routes_completed']} · final. {k['routes_finalized']}\n"
+            f"📦 <b>Entregues:</b> {k['delivered']} · ❌ <b>Falhas:</b> {k['failed']} · ✅ <b>Sucesso:</b> {k['success_rate']:.1f}%\n"
+            f"📈 <b>Médias por rota:</b> Receita R$ {k['avg_income_per_route']:,.2f} · Despesa R$ {k['avg_expense_per_route']:,.2f}\n"
+            f"🏷️ <b>Despesas por tipo:</b> {eb}"
         )
 
     def _format_compare(title: str, a_label: str, a: dict, b_label: str, b: dict) -> str:
@@ -5654,7 +5663,7 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 return ""
 
-        lines = [title]
+        lines = [f"{esc(title)}"]
         metrics = [
             ("Receita", a['income_total'], b['income_total']),
             ("Despesas", a['expense_total'], b['expense_total']),
@@ -5665,17 +5674,17 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ("Falhas", a['failed'], b['failed']),
             ("Sucesso %", a['success_rate'], b['success_rate']),
         ]
-        lines.append(f"A: {a_label} ({a['period']['start']} a {a['period']['end']})")
-        lines.append(f"B: {b_label} ({b['period']['start']} a {b['period']['end']})")
+        lines.append(f"🅰️ <b>{esc(a_label)}</b>: <code>{esc(a['period']['start'])}</code> a <code>{esc(a['period']['end'])}</code>")
+        lines.append(f"🅱️ <b>{esc(b_label)}</b>: <code>{esc(b['period']['start'])}</code> a <code>{esc(b['period']['end'])}</code>")
         for name, va, vb in metrics:
             if isinstance(va, (int, float)) and isinstance(vb, (int, float)):
                 comp = delta(va, vb)
                 if name in ("Receita", "Despesas", "Lucro", "Média Receita/Rota", "Média Despesa/Rota"):
-                    lines.append(f"• {name}: {va:,.2f} vs {vb:,.2f} {comp}")
+                    lines.append(f"• <b>{esc(name)}:</b> R$ {va:,.2f} vs R$ {vb:,.2f} <i>{comp}</i>")
                 elif name == "Sucesso %":
-                    lines.append(f"• {name}: {va:.1f}% vs {vb:.1f}% {comp}")
+                    lines.append(f"• <b>{esc(name)}:</b> {va:.1f}% vs {vb:.1f}% <i>{comp}</i>")
                 else:
-                    lines.append(f"• {name}: {va} vs {vb} {comp}")
+                    lines.append(f"• <b>{esc(name)}:</b> {va} vs {vb} <i>{comp}</i>")
         return "\n".join(lines)
 
     question = _extract_command_argument(update, context)
@@ -5709,13 +5718,8 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             last = ("passada" in qlow) or ("anterior" in qlow)
             start, end = _week_range(now, offset_weeks=-1 if last else 0)
             k = _kpis(db, start, end)
-            report = _format_report("📊 Relatório Semanal", k)
-            await context.bot.send_message(chat_id=target_chat_id, text=report)
-            if redirect_notice:
-                try:
-                    await update.message.reply_text("✅ Relatório enviado no grupo de análise.")
-                except Exception:
-                    pass
+            report = _format_report("📊 <b>Relatório Semanal</b>", k)
+            await context.bot.send_message(chat_id=target_chat_id, text=report, parse_mode='HTML')
             return
 
         # 2) Comparação entre semanas (atual vs passada)
@@ -5724,13 +5728,8 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             b_start, b_end = _week_range(now, -1)
             a = _kpis(db, a_start, a_end)
             b = _kpis(db, b_start, b_end)
-            comp = _format_compare("📈 Comparação: Semana Atual vs Semana Passada", "Semana Atual", a, "Semana Passada", b)
-            await context.bot.send_message(chat_id=target_chat_id, text=comp)
-            if redirect_notice:
-                try:
-                    await update.message.reply_text("✅ Comparação enviada no grupo de análise.")
-                except Exception:
-                    pass
+            comp = _format_compare("📈 <b>Comparação</b>: Semana Atual vs Semana Passada", "Semana Atual", a, "Semana Passada", b)
+            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='HTML')
             return
 
         # 3) Comparação entre meses (atual vs anterior)
@@ -5739,13 +5738,8 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
             b_start, b_end = _month_range(now, -1)
             a = _kpis(db, a_start, a_end)
             b = _kpis(db, b_start, b_end)
-            comp = _format_compare("📈 Comparação: Mês Atual vs Mês Anterior", "Mês Atual", a, "Mês Anterior", b)
-            await context.bot.send_message(chat_id=target_chat_id, text=comp)
-            if redirect_notice:
-                try:
-                    await update.message.reply_text("✅ Comparação enviada no grupo de análise.")
-                except Exception:
-                    pass
+            comp = _format_compare("📈 <b>Comparação</b>: Mês Atual vs Mês Anterior", "Mês Atual", a, "Mês Anterior", b)
+            await context.bot.send_message(chat_id=target_chat_id, text=comp, parse_mode='HTML')
             return
 
         # 4) Conselho/Opinião com base nos números (usa IA com KPIs como contexto)
@@ -5802,20 +5796,93 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _format_report("Semana Passada", k_prev_week)
             )
 
-        header = f"💬 Pergunta de {update.effective_user.first_name or update.effective_user.id}:\n{question}"
+        header = f"💬 <b>Pergunta de</b> <code>{esc(update.effective_user.first_name or update.effective_user.id)}</code>:\n{esc(question)}"
         try:
-            await context.bot.send_message(chat_id=target_chat_id, text=header)
-            await context.bot.send_message(chat_id=target_chat_id, text=f"📊 Contexto numérico pronto.\n🤖 {answer}")
+            await context.bot.send_message(chat_id=target_chat_id, text=header, parse_mode='HTML')
+            await context.bot.send_message(chat_id=target_chat_id, text=f"📊 <b>Contexto numérico pronto.</b>\n🤖 {esc(answer)}", parse_mode='HTML')
         except Exception:
             await update.message.reply_text(f"🤖 {answer}")
-        else:
-            if redirect_notice:
-                try:
-                    await update.message.reply_text("✅ Resposta enviada no grupo de análise.")
-                except Exception:
-                    pass
     finally:
         db.close()
+
+
+# ==================== RESET SEGURO DA EMPRESA ====================
+
+async def cmd_resetar_empresa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    try:
+        me = get_user_by_tid(db, update.effective_user.id)
+    finally:
+        db.close()
+    if not me or me.role != "manager":
+        await update.message.reply_text("⛔ Apenas gerentes podem resetar os dados.")
+        return ConversationHandler.END
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    phrase = f"APAGAR TUDO {today}"
+    context.user_data['reset_phrase'] = phrase
+    msg = (
+        "⚠️ <b>Resetar Empresa</b>\n\n"
+        "Esta ação irá <b>apagar todos os dados</b> da empresa, incluindo:\n"
+        "• Rotas, Pacotes, Comprovantes\n"
+        "• Receitas (Income), Despesas (Expense), KM (Mileage)\n"
+        "• Relatórios de IA e Tokens de Link\n\n"
+        "Usuários serão mantidos.\n\n"
+        f"Para confirmar, digite exatamente: <code>{html.escape(phrase)}</code>\n"
+        "(sensível a espaços e data)."
+    )
+    await update.message.reply_text(msg, parse_mode='HTML')
+    return RESET_CONFIRM
+
+
+async def on_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    expected = context.user_data.get('reset_phrase')
+    typed = (update.message.text or '').strip()
+    if typed != expected:
+        await update.message.reply_text("❌ Frase incorreta. Operação cancelada.")
+        context.user_data.pop('reset_phrase', None)
+        return ConversationHandler.END
+
+    # Executa limpeza
+    db = SessionLocal()
+    try:
+        # Apagar dados (ordem para evitar referencias)
+        db.query(DeliveryProof).delete(synchronize_session=False)
+        db.query(Package).delete(synchronize_session=False)
+        db.query(Expense).delete(synchronize_session=False)
+        db.query(Income).delete(synchronize_session=False)
+        db.query(Mileage).delete(synchronize_session=False)
+        db.query(AIReport).delete(synchronize_session=False)
+        db.query(LinkToken).delete(synchronize_session=False)
+        db.query(Route).delete(synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        await update.message.reply_text(f"❌ Erro ao limpar dados: {e}")
+        return ConversationHandler.END
+    finally:
+        db.close()
+
+    # Limpar uploads (imports e proofs)
+    try:
+        base = BASE_DIR / 'uploads'
+        for sub in ['imports', 'proofs']:
+            p = base / sub
+            if p.exists() and p.is_dir():
+                for child in p.iterdir():
+                    try:
+                        if child.is_file():
+                            child.unlink(missing_ok=True)
+                        elif child.is_dir():
+                            shutil.rmtree(child, ignore_errors=True)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    context.user_data.pop('reset_phrase', None)
+    await update.message.reply_text("🧹 Dados apagados com sucesso. Sistema resetado.")
+    return ConversationHandler.END
 
 
 async def _post_init(application):
@@ -5863,6 +5930,17 @@ def setup_bot_handlers(app: Application):
     # /rastrear removido (rastreio via /rotas -> botão "🗺️ Rastrear")
     app.add_handler(CommandHandler("chat_ia", cmd_chat_ia))
     app.add_handler(CommandHandler("chatia", cmd_chat_ia))
+    # Reset seguro
+    reset_conv = ConversationHandler(
+        entry_points=[CommandHandler("resetar_empresa", cmd_resetar_empresa)],
+        states={
+            RESET_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, on_reset_confirm)],
+        },
+        fallbacks=[CommandHandler("cancelar", cmd_cancelar)],
+        name="reset_conv",
+        persistent=False,
+    )
+    app.add_handler(reset_conv)
     app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record:"))
     app.add_handler(CallbackQueryHandler(on_view_fin_record, pattern=r"^view_fin_record_by_date:"))
     app.add_handler(CallbackQueryHandler(on_edit_fin_record, pattern=r"^edit_fin_record:"))
