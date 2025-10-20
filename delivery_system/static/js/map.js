@@ -490,39 +490,95 @@
 
     // Link para entregar todos com token curto (evita limite de 64 chars do Telegram)
     const pendingIds = packages.filter(p => p.status === 'pending').map(p => p.id);
-    let groupLink = null;
-    if (pendingIds.length > 0) {
-      // criamos o link sob demanda via token (evita expor IDs longos)
-      // usamos um placeholder e substituímos após gerar o token
-      groupLink = `javascript:void(0)`;
-    }
+    const pendingCount = pendingIds.length;
     
     return `
-      <div style="min-width: 280px; max-width: 320px;">
+      <div style="min-width: 300px; max-width: 360px;">
         <div style="
           background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
           color: white;
-          padding: 12px;
+          padding: 14px;
           margin: -12px -12px 12px -12px;
           border-radius: 8px 8px 0 0;
           font-weight: 700;
-          font-size: 14px;
+          font-size: 15px;
         ">
           📍 ${packages.length} Pacote${packages.length > 1 ? 's' : ''} nesta Parada
         </div>
-        <div style="max-height: 300px; overflow-y: auto;">
+        
+        <div style="max-height: 280px; overflow-y: auto; margin-bottom: 12px;">
           ${packagesList}
         </div>
-        <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; flex-direction: column;">
-          <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="width: 100%; text-align: center; ${valid ? '' : 'opacity:0.4; pointer-events:none;'}">
-            🧭 Navegar para este Endereço
-          </a>
-          ${pendingIds.length > 0 ? `
+        
+        <!-- BOTÃO GRANDE DE ENTREGAR NO TOPO -->
+        ${pendingCount > 0 ? `
           <a class="popup-btn deliver deliver-all" href="#" data-ids="${pendingIds.join(',')}" style="
-            width: 100%; text-align: center; background: #10b981; color: white; font-size: 14px; padding: 10px; border: 1px solid #059669; border-radius: 10px; font-weight: 800;
-          ">
-            ✓ Entregar todos deste endereço
-          </a>` : ''}
+            display: block;
+            width: 100%;
+            text-align: center;
+            background: #10b981;
+            color: white;
+            font-size: 16px;
+            font-weight: 800;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            text-decoration: none;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+            margin-bottom: 10px;
+            transition: all 0.2s;
+          " onmouseover="this.style.background='#059669'; this.style.transform='scale(1.02)'" onmouseout="this.style.background='#10b981'; this.style.transform='scale(1)'">
+            ✓ ENTREGAR TODOS (${pendingCount})
+          </a>
+        ` : ''}
+        
+        <!-- 3 BOTÕES PEQUENOS EMBAIXO -->
+        <div style="display: flex; gap: 8px; align-items: center;">
+          ${pendingCount > 0 ? `
+            <button onclick="event.stopPropagation(); ${pendingIds.map(id => `markPackageDelivered(${id})`).join('; ')};" style="
+              flex: 1;
+              padding: 10px;
+              background: #10b981;
+              color: white;
+              border: none;
+              border-radius: 8px;
+              font-size: 13px;
+              font-weight: 700;
+              cursor: pointer;
+              transition: all 0.2s;
+            " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">
+              ✓ Marcar
+            </button>
+            <a href="https://t.me/${botUsername}?start=entrega_fail_${pendingIds[0]}" target="_blank" rel="noopener" style="
+              flex: 1;
+              padding: 10px;
+              background: #ef4444;
+              color: white;
+              border-radius: 8px;
+              font-size: 13px;
+              font-weight: 700;
+              text-align: center;
+              text-decoration: none;
+              transition: all 0.2s;
+            " onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">
+              ✕ Insucesso
+            </a>
+          ` : ''}
+          <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="
+            flex: 1;
+            padding: 10px;
+            background: #3b82f6;
+            color: white;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            text-align: center;
+            text-decoration: none;
+            transition: all 0.2s;
+            ${valid ? '' : 'opacity:0.4; pointer-events:none;'}
+          " onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">
+            🧭 Ir
+          </a>
         </div>
       </div>
     `;
@@ -605,11 +661,20 @@
   function createListItem(pkg, marker, index){
     const li = document.createElement('li');
     li.className = `list-item ${pkg.status}`;
+    li.style.cssText = `
+      padding: 12px;
+      border-bottom: 1px solid #e5e7eb;
+      cursor: pointer;
+      transition: background 0.2s;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    `;
 
     // Indicador de cor de área
     if (pkg.areaColor && pkg.status === 'pending') {
       const areaIndicator = document.createElement('div');
-      areaIndicator.className = 'area-indicator';
       areaIndicator.style.cssText = `
         position: absolute;
         left: 0;
@@ -620,146 +685,228 @@
         border-radius: 0 4px 4px 0;
       `;
       li.appendChild(areaIndicator);
-      li.style.position = 'relative';
     }
+
+    // Container superior: pin + info + badge
+    const topRow = document.createElement('div');
+    topRow.style.cssText = 'display: flex; align-items: center; gap: 12px;';
 
     const pinNum = document.createElement('div');
-    pinNum.className = 'pin-number';
+    pinNum.style.cssText = `
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: ${pkg.status === 'delivered' ? '#10b981' : pkg.status === 'failed' ? '#ef4444' : (pkg.areaColor?.primary || '#9333ea')};
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 14px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    `;
     pinNum.textContent = index + 1;
-    
-    // Aplica cor de área ao número se pendente
-    if (pkg.areaColor && pkg.status === 'pending') {
-      pinNum.style.background = pkg.areaColor.primary;
-    }
 
     const info = document.createElement('div');
-    info.className = 'pkg-info';
+    info.style.cssText = 'flex: 1; min-width: 0;';
 
-    const code = document.createElement('div');
-    code.className = 'pkg-code';
-    code.textContent = pkg.tracking_code || 'Sem código';
-
+    // ENDEREÇO EM DESTAQUE (principal)
     const addr = document.createElement('div');
-    addr.className = 'pkg-addr';
+    addr.style.cssText = `
+      font-size: 14px;
+      font-weight: 600;
+      color: #1f2937;
+      line-height: 1.3;
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    `;
     addr.textContent = pkg.address || 'Sem endereço';
 
-    info.appendChild(code);
+    // Código de rastreio (secundário, menor)
+    const code = document.createElement('div');
+    code.style.cssText = `
+      font-size: 11px;
+      color: #9ca3af;
+      font-weight: 500;
+      font-family: 'SF Mono', 'Consolas', monospace;
+    `;
+    code.textContent = pkg.tracking_code || 'Sem código';
+
     info.appendChild(addr);
+    info.appendChild(code);
 
     const badge = document.createElement('div');
-    badge.className = 'status-badge';
+    badge.style.cssText = `
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      ${pkg.status === 'pending' ? 'background: #dbeafe; color: #1e40af;' : ''}
+      ${pkg.status === 'delivered' ? 'background: #d1fae5; color: #065f46;' : ''}
+      ${pkg.status === 'failed' ? 'background: #fee2e2; color: #991b1b;' : ''}
+    `;
     badge.textContent = getStatusText(pkg.status);
 
-    // Botão de ação (Marcar Entregue ou Navegar)
-    const actionBtn = document.createElement('button');
-    actionBtn.className = 'action-btn';
-    actionBtn.style.cssText = `
-      padding: 6px 12px;
-      margin-left: 8px;
-      border: none;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.2s ease;
-    `;
-    
-    if (pkg.status === 'pending') {
-      actionBtn.textContent = '✅ Marcar Entregue';
-      actionBtn.style.background = '#10b981';
-      actionBtn.style.color = 'white';
-      actionBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await markPackageDelivered(pkg.id);
-      });
-    } else if (pkg.status === 'delivered') {
-      actionBtn.textContent = '✔️ Entregue';
-      actionBtn.style.background = '#d1d5db';
-      actionBtn.style.color = '#666';
-      actionBtn.disabled = true;
-    } else if (pkg.status === 'failed') {
-      actionBtn.textContent = '❌ Falhou';
-      actionBtn.style.background = '#ef4444';
-      actionBtn.style.color = 'white';
-      actionBtn.disabled = true;
-    }
+    topRow.appendChild(pinNum);
+    topRow.appendChild(info);
+    topRow.appendChild(badge);
 
-    // Botão de navegação somente se coordenadas válidas
-    const navBtn = document.createElement('a');
-    navBtn.className = 'nav-btn';
-    navBtn.textContent = '🗺️';
-    navBtn.title = 'Navegar no Google Maps';
-    navBtn.target = '_blank';
-    navBtn.rel = 'noopener';
-    navBtn.style.cssText = `
-      padding: 6px 10px;
-      margin-left: 4px;
-      text-decoration: none;
-      display: inline-block;
-    `;
-    if (isFinite(pkg.latitude) && isFinite(pkg.longitude) && Math.abs(pkg.latitude) <= 90 && Math.abs(pkg.longitude) <= 180) {
-      navBtn.href = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
-    } else {
-      navBtn.href = '#';
-      navBtn.title = 'Coordenadas indisponíveis';
-      navBtn.style.opacity = '0.4';
-      navBtn.style.pointerEvents = 'none';
-    }
+    // BOTÕES: Entregar grande no topo, 3 pequenos embaixo
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 6px; margin-top: 4px;';
 
-    // Botão de Entregar via Telegram (fluxo completo com fotos)
-    let deliverBtn = null;
     if (pkg.status === 'pending') {
-      deliverBtn = document.createElement('a');
-      deliverBtn.className = 'deliver-btn';
-      deliverBtn.textContent = '📋 Entregar';
-      deliverBtn.title = 'Abrir Telegram para registro completo com fotos';
+      // BOTÃO GRANDE: ENTREGAR
+      const deliverBtn = document.createElement('a');
       deliverBtn.href = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
       deliverBtn.target = '_blank';
       deliverBtn.rel = 'noopener';
       deliverBtn.style.cssText = `
-        padding: 6px 10px;
-        margin-left: 4px;
-        text-decoration: none;
-        display: inline-block;
+        display: block;
+        text-align: center;
+        padding: 12px;
         background: #10b981;
         color: white;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: 600;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 800;
+        text-decoration: none;
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        transition: all 0.2s;
       `;
-    }
+      deliverBtn.textContent = '✓ ENTREGAR';
+      deliverBtn.addEventListener('mouseover', () => {
+        deliverBtn.style.background = '#059669';
+        deliverBtn.style.transform = 'scale(1.02)';
+      });
+      deliverBtn.addEventListener('mouseout', () => {
+        deliverBtn.style.background = '#10b981';
+        deliverBtn.style.transform = 'scale(1)';
+      });
 
-    // Botão de Insucesso (abre fluxo rápido no Telegram)
-    let failBtn = null;
-    if (pkg.status === 'pending') {
-      failBtn = document.createElement('a');
-      failBtn.className = 'fail-btn';
-      failBtn.textContent = '❌ Insucesso';
-      failBtn.title = 'Abrir Telegram para registrar insucesso com foto e observação';
+      // 3 BOTÕES PEQUENOS
+      const smallBtnsRow = document.createElement('div');
+      smallBtnsRow.style.cssText = 'display: flex; gap: 6px;';
+
+      // Botão 1: Marcar Entregue (✓)
+      const markBtn = document.createElement('button');
+      markBtn.style.cssText = `
+        flex: 1;
+        padding: 8px;
+        background: #10b981;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.2s;
+      `;
+      markBtn.textContent = '✓ Marcar';
+      markBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await markPackageDelivered(pkg.id);
+      });
+      markBtn.addEventListener('mouseover', () => markBtn.style.background = '#059669');
+      markBtn.addEventListener('mouseout', () => markBtn.style.background = '#10b981');
+
+      // Botão 2: Insucesso (✕)
+      const failBtn = document.createElement('a');
       failBtn.href = `https://t.me/${botUsername}?start=entrega_fail_${pkg.id}`;
       failBtn.target = '_blank';
       failBtn.rel = 'noopener';
       failBtn.style.cssText = `
-        padding: 6px 10px;
-        margin-left: 4px;
-        text-decoration: none;
-        display: inline-block;
+        flex: 1;
+        padding: 8px;
         background: #ef4444;
         color: white;
-        border-radius: 4px;
+        border-radius: 6px;
         font-size: 12px;
         font-weight: 700;
+        text-align: center;
+        text-decoration: none;
+        transition: all 0.2s;
       `;
+      failBtn.textContent = '✕ Falha';
+      failBtn.addEventListener('mouseover', () => failBtn.style.background = '#dc2626');
+      failBtn.addEventListener('mouseout', () => failBtn.style.background = '#ef4444');
+
+      // Botão 3: Navegar (🧭)
+      const navBtn = document.createElement('a');
+      navBtn.target = '_blank';
+      navBtn.rel = 'noopener';
+      navBtn.style.cssText = `
+        flex: 1;
+        padding: 8px;
+        background: #3b82f6;
+        color: white;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        text-align: center;
+        text-decoration: none;
+        transition: all 0.2s;
+      `;
+      navBtn.textContent = '🧭 Ir';
+      
+      if (isFinite(pkg.latitude) && isFinite(pkg.longitude) && Math.abs(pkg.latitude) <= 90 && Math.abs(pkg.longitude) <= 180) {
+        navBtn.href = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
+      } else {
+        navBtn.href = '#';
+        navBtn.style.opacity = '0.4';
+        navBtn.style.pointerEvents = 'none';
+      }
+      navBtn.addEventListener('mouseover', () => navBtn.style.background = '#2563eb');
+      navBtn.addEventListener('mouseout', () => navBtn.style.background = '#3b82f6');
+
+      smallBtnsRow.appendChild(markBtn);
+      smallBtnsRow.appendChild(failBtn);
+      smallBtnsRow.appendChild(navBtn);
+
+      buttonsContainer.appendChild(deliverBtn);
+      buttonsContainer.appendChild(smallBtnsRow);
+    } else {
+      // Pacote já entregue/falhou - apenas botão de navegação
+      const navBtn = document.createElement('a');
+      navBtn.target = '_blank';
+      navBtn.rel = 'noopener';
+      navBtn.style.cssText = `
+        display: block;
+        text-align: center;
+        padding: 10px;
+        background: #3b82f6;
+        color: white;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+        transition: all 0.2s;
+      `;
+      navBtn.textContent = '🧭 Navegar';
+      
+      if (isFinite(pkg.latitude) && isFinite(pkg.longitude) && Math.abs(pkg.latitude) <= 90 && Math.abs(pkg.longitude) <= 180) {
+        navBtn.href = `https://www.google.com/maps?q=${pkg.latitude},${pkg.longitude}`;
+      } else {
+        navBtn.href = '#';
+        navBtn.style.opacity = '0.4';
+        navBtn.style.pointerEvents = 'none';
+      }
+      navBtn.addEventListener('mouseover', () => navBtn.style.background = '#2563eb');
+      navBtn.addEventListener('mouseout', () => navBtn.style.background = '#3b82f6');
+
+      buttonsContainer.appendChild(navBtn);
     }
 
-    li.appendChild(pinNum);
-    li.appendChild(info);
-    li.appendChild(badge);
-    li.appendChild(actionBtn);
-    li.appendChild(navBtn);
-  if (deliverBtn) li.appendChild(deliverBtn);
-  if (failBtn) li.appendChild(failBtn);
+    li.appendChild(topRow);
+    li.appendChild(buttonsContainer);
 
     li.addEventListener('click', (e)=>{
       if(e.target.tagName.toLowerCase() === 'a' || e.target.tagName.toLowerCase() === 'button') return;
