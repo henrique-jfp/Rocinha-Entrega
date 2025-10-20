@@ -75,17 +75,12 @@
   // 🎨 SISTEMA DE CORES POR ÁREA GEOGRÁFICA
   // ============================================
   
-  // Define cores vibrantes para diferentes áreas
+  // Define cores vibrantes para diferentes áreas - MÁXIMO 3 ÁREAS
   // Paleta sem verde/vermelho para não conflitar com status Entregue/Falhou
   const AREA_COLORS = [
     { primary: '#7c3aed', shadow: 'rgba(124, 58, 237, 0.35)', name: 'Roxo' },     // 1
     { primary: '#f59e0b', shadow: 'rgba(245, 158, 11, 0.35)', name: 'Laranja' },  // 2
     { primary: '#3b82f6', shadow: 'rgba(59, 130, 246, 0.35)', name: 'Azul' },     // 3
-    { primary: '#06b6d4', shadow: 'rgba(6, 182, 212, 0.35)', name: 'Ciano' },     // 4
-    { primary: '#a855f7', shadow: 'rgba(168, 85, 247, 0.35)', name: 'Violeta' },  // 5
-    { primary: '#f97316', shadow: 'rgba(249, 115, 22, 0.35)', name: 'Âmbar' },    // 6
-    { primary: '#0ea5e9', shadow: 'rgba(14, 165, 233, 0.35)', name: 'Azul Claro'},// 7
-    { primary: '#6366f1', shadow: 'rgba(99, 102, 241, 0.35)', name: 'Índigo' },   // 8
   ];
 
   // Divide pacotes em áreas geográficas usando K-means simplificado
@@ -96,8 +91,8 @@
     const validPackages = packages.filter(p => p.latitude && p.longitude);
     if (validPackages.length === 0) return [];
     
-    // Determina número de áreas (máximo 8, mínimo 2)
-    const numAreas = Math.min(8, Math.max(2, Math.ceil(validPackages.length / 10)));
+    // Determina número de áreas (MÁXIMO 3, mínimo 2)
+    const numAreas = Math.min(3, Math.max(2, Math.ceil(validPackages.length / 15)));
     
     // Inicializa centroides aleatórios
     const centroids = [];
@@ -288,6 +283,46 @@
     }
     
     // Pin individual - gota/lágrima estilo SPX
+    // Adiciona checkmark verde ou X vermelho para entregue/falhou
+    let statusIcon = '';
+    if(status === 'delivered') {
+      statusIcon = `<div style="
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        width: 16px;
+        height: 16px;
+        background: #10b981;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        z-index: 2;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      ">✓</div>`;
+    } else if(status === 'failed') {
+      statusIcon = `<div style="
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        width: 16px;
+        height: 16px;
+        background: #ef4444;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 900;
+        color: #fff;
+        z-index: 2;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      ">✕</div>`;
+    }
+    
     const html = `
     <div style="position: relative; width: 36px; height: 48px;">
       <!-- Pin em formato de gota/lágrima -->
@@ -321,6 +356,9 @@
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
         z-index: 1;
       ">${number}</div>
+      
+      <!-- Ícone de status (checkmark ou X) -->
+      ${statusIcon}
     </div>`;
     
     return L.divIcon({
@@ -734,8 +772,8 @@
     return li;
   }
 
-  // Função para marcar pacote como entregue
-  async function markPackageDelivered(packageId) {
+  // Função para marcar pacote como entregue (GLOBAL para funcionar nos popups)
+  window.markPackageDelivered = async function(packageId) {
     try {
       console.log(`📦 Marcando pacote ${packageId} como entregue...`);
       
@@ -762,7 +800,7 @@
       console.error('❌ Erro ao marcar entrega:', err);
       showUpdateNotification(`❌ Erro: ${err.message}`, 'error');
     }
-  }
+  };
 
   // Mostra notificação de atualização
   function showUpdateNotification(message, type = 'success'){
