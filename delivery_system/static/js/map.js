@@ -53,6 +53,9 @@
 
     // Armazena estado anterior para detectar mudanças
     let previousPackageStates = {};
+    
+    // ⚠️ GLOBAL: Array de pacotes (usado pelo scanner de código de barras)
+    let packages = [];
 
   // Função para calcular distância entre dois pontos (em metros)
   function getDistance(lat1, lng1, lat2, lng2) {
@@ -1084,6 +1087,9 @@
         console.error('❌ Dados não são um array:', typeof data);
         throw new Error(`Tipo inesperado: esperado array, recebido ${typeof data}`);
       }
+      
+      // ⚠️ Salva pacotes na variável global para uso do scanner
+      packages = data;
 
       markersLayer.clearLayers();
       const list = document.getElementById('package-list');
