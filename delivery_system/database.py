@@ -170,7 +170,7 @@ class Expense(Base):
     fuel_type: Mapped[Optional[str]] = mapped_column(String(50))  # gasolina, diesel, etanol (se type=combustivel)
     fuel_liters: Mapped[Optional[float]] = mapped_column(Float)
     employee_name: Mapped[Optional[str]] = mapped_column(String(255))  # se type=salario
-    route_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("route.id", ondelete="SET NULL"), nullable=True)  # ✅ FASE 4.1: Link com rota
+    route_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("route.id", ondelete="CASCADE"), nullable=True)  # ✅ CASCADE: Exclui despesa quando rota é excluída
     confirmed: Mapped[bool] = mapped_column(Integer, default=1, nullable=False)  # ✅ FASE 4.1: Se está confirmada (1) ou pendente (0)
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -189,7 +189,7 @@ class Income(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     date: Mapped[datetime] = mapped_column(Date, nullable=False, index=True)
-    route_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("route.id", ondelete="SET NULL"))
+    route_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("route.id", ondelete="CASCADE"))  # ✅ CASCADE: Exclui receita quando rota é excluída
     description: Mapped[str] = mapped_column(String(500), nullable=False)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=False)
