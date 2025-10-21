@@ -239,6 +239,10 @@ def create_app() -> FastAPI:
         print(f"   É produção: {is_production}")
         print(f"   ✅ base_url final: {base_url}")
         
+        # Timestamp para cache busting
+        import time
+        cache_bust = int(time.time())
+        
         return templates.TemplateResponse(
             "map.html",
             {
@@ -246,7 +250,8 @@ def create_app() -> FastAPI:
                 "route_id": route_id,
                 "driver_id": driver_id,
                 "bot_username": BOT_USERNAME,
-                "base_url": base_url
+                "base_url": base_url,
+                "cache_bust": cache_bust
             },
         )
 
