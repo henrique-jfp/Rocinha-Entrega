@@ -1386,6 +1386,224 @@
     searchInput.dispatchEvent(new Event('input'));
     searchInput.focus();
   });
+
+  // ================================================================================
+  // SCANNER DE CÓDIGO DE BARRAS
+  // ================================================================================
+
+  let barcodeScanner = null;
+  let scannerStream = null;
+
+  // Carrega biblioteca ZXing para leitura de códigos
+  function loadZXingLibrary() {
+    if (window.ZXing) {
+      console.log('✅ ZXing já carregado');
+      return Promise.resolve();
+    }
+    
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js';
+      script.onload = () => {
+        console.log('✅ Biblioteca ZXing carregada');
+        resolve();
+      };
+      script.onerror = () => {
+        console.error('❌ Erro ao carregar ZXing');
+        reject(new Error('Falha ao carregar biblioteca de scanner'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+
+  // Inicializa scanner
+  async function initBarcodeScanner() {
+    if (!window.ZXing) {
+      await loadZXingLibrary();
+    }
+    
+    const { BrowserMultiFormatReader } = window.ZXing;
+    barcodeScanner = new BrowserMultiFormatReader();
+    console.log('✅ Scanner de código de barras inicializado');
+  }
+
+  // Abre modal do scanner
+  window.scanAndDeliver = async function() {
+    try {
+      console.log('📷 Iniciando scanner de código de barras...');
+      
+      // Mostra modal com preview da camera
+      const modal = document.createElement('div');
+      modal.id = 'scanner-modal';
+      modal.innerHTML = `
+        <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                    background: rgba(0,0,0,0.95); z-index: 10000; display: flex; 
+                    flex-direction: column; align-items: center; justify-content: center;">
+          <div style="color: white; margin-bottom: 15px; font-size: 20px; font-weight: bold; text-align: center; padding: 0 20px;">
+            📷 Aponte para o código de barras do pacote
+          </div>
+          <div style="position: relative; width: 90%; max-width: 500px;">
+            <video id="scanner-video" autoplay playsinline 
+                   style="width: 100%; border: 3px solid #4CAF50; border-radius: 10px; background: #000;"></video>
+            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                        width: 80%; height: 30%; border: 2px solid #4CAF50; border-radius: 5px;
+                        pointer-events: none; box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);"></div>
+          </div>
+          <div id="scanner-status" style="color: #4CAF50; margin-top: 15px; font-size: 16px; text-align: center;">
+            Aguardando código...
+          </div>
+          <button onclick="closeScannerModal()" 
+                  style="margin-top: 20px; padding: 15px 40px; font-size: 18px; font-weight: bold;
+                         background: #f44336; color: white; border: none; border-radius: 8px;
+                         cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+            ❌ Cancelar
+          </button>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      
+      // Inicializa scanner se necessário
+      if (!barcodeScanner) {
+        document.getElementById('scanner-status').textContent = 'Carregando scanner...';
+        await initBarcodeScanner();
+      }
+      
+      const videoElement = document.getElementById('scanner-video');
+      document.getElementById('scanner-status').textContent = 'Aguardando código...';
+      
+      // Inicia leitura da camera
+      scannerStream = await barcodeScanner.decodeFromVideoDevice(
+        null, // Usa camera padrão (traseira em celulares)
+        'scanner-video',
+        (result, error) => {
+          if (result) {
+            const barcode = result.text;
+            console.log('✅ Código detectado:', barcode);
+            document.getElementById('scanner-status').textContent = `✅ Código: ${barcode}`;
+            
+            // Para o scanner e fecha modal
+            closeScannerModal();
+            
+            // Busca pacote e inicia entrega
+            findPackageAndDeliver(barcode);
+          }
+          
+          if (error && error.name !== 'NotFoundException') {
+            console.warn('⚠️ Erro no scanner:', error.message);
+          }
+        }
+      );
+      
+    } catch (error) {
+      console.error('❌ Erro ao abrir scanner:', error);
+      alert('❌ Erro ao acessar camera: ' + error.message + '\n\nVerifique as permissões de camera.');
+      closeScannerModal();
+    }
+  };
+
+  // Fecha modal do scanner
+  window.closeScannerModal = function() {
+    console.log('🔒 Fechando scanner...');
+    
+    // Para o scanner
+    if (barcodeScanner) {
+      try {
+        barcodeScanner.reset();
+      } catch (e) {
+        console.warn('Erro ao resetar scanner:', e);
+      }
+    }
+    
+    // Para o stream de video
+    if (scannerStream) {
+      try {
+        const videoElement = document.getElementById('scanner-video');
+        if (videoElement && videoElement.srcObject) {
+          const tracks = videoElement.srcObject.getTracks();
+          tracks.forEach(track => track.stop());
+        }
+      } catch (e) {
+        console.warn('Erro ao parar stream:', e);
+      }
+      scannerStream = null;
+    }
+    
+    // Remove modal
+    const modal = document.getElementById('scanner-modal');
+    if (modal) {
+      modal.remove();
+    }
+  };
+
+  // Busca pacote pelo código e inicia entrega
+  async function findPackageAndDeliver(barcode) {
+    try {
+      console.log('🔍 Buscando pacote com código:', barcode);
+      
+      // Busca nos pacotes carregados
+      const pkg = packages.find(p => 
+        p.tracking_code === barcode && p.status === 'pending'
+      );
+      
+      if (!pkg) {
+        // Tenta buscar variações (sem espaços, maiúscula/minúscula)
+        const normalizedBarcode = barcode.trim().toUpperCase();
+        const pkgVariant = packages.find(p => 
+          p.tracking_code.trim().toUpperCase() === normalizedBarcode && 
+          p.status === 'pending'
+        );
+        
+        if (pkgVariant) {
+          console.log('✅ Pacote encontrado (variação):', pkgVariant);
+          confirmAndStartDelivery(pkgVariant, barcode);
+          return;
+        }
+        
+        alert(
+          `❌ Pacote não encontrado!\n\n` +
+          `Código: ${barcode}\n\n` +
+          `Possíveis motivos:\n` +
+          `• Pacote já foi entregue\n` +
+          `• Código não está nesta rota\n` +
+          `• Código incorreto\n\n` +
+          `Tente novamente ou entregue manualmente.`
+        );
+        return;
+      }
+      
+      console.log('✅ Pacote encontrado:', pkg);
+      confirmAndStartDelivery(pkg, barcode);
+      
+    } catch (error) {
+      console.error('❌ Erro ao buscar pacote:', error);
+      alert('❌ Erro ao buscar pacote: ' + error.message);
+    }
+  }
+
+  // Confirma e inicia entrega
+  function confirmAndStartDelivery(pkg, barcode) {
+    // Destaca o pacote no mapa
+    map.setView([pkg.latitude, pkg.longitude], 17, { animate: true });
+    
+    // Mostra confirmação
+    const confirmed = confirm(
+      `✅ Pacote Encontrado!\n\n` +
+      `📦 Código: ${barcode}\n` +
+      `📍 Endereço: ${pkg.address}\n` +
+      `🏘️ Bairro: ${pkg.neighborhood || 'N/A'}\n\n` +
+      `Deseja iniciar o processo de entrega no Telegram?`
+    );
+    
+    if (confirmed) {
+      console.log('🚀 Iniciando entrega via Telegram para pacote:', pkg.id);
+      startDelivery(pkg.id);
+    }
+  }
+
+  // Pré-carrega biblioteca ao iniciar mapa
+  loadZXingLibrary().catch(err => {
+    console.warn('⚠️ Não foi possível pré-carregar ZXing:', err);
+  });
   
   } catch(err) {
     console.error('❌ Erro fatal no map script:', err);

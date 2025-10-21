@@ -24,8 +24,8 @@
       rel="stylesheet"
     />
 
-  <!-- App CSS (cache bust v=19) -->
-  <link rel="stylesheet" href="/static/css/style.css?v=19" />
+  <!-- App CSS (cache bust v=20) -->
+  <link rel="stylesheet" href="/static/css/style.css?v=20" />
   </head>
   <body
     data-route-id="{{ route_id }}"
@@ -44,6 +44,7 @@
       <div id="map-container">
         <div id="map"></div>
         <button id="toggle-sidebar" class="toggle-btn" aria-label="Mostrar/Ocultar Lista">☰</button>
+        <button id="scanner-btn" onclick="scanAndDeliver()" class="scanner-btn" aria-label="Escanear Código de Barras">📷</button>
       </div>
 
       <aside id="sidebar">
@@ -62,7 +63,7 @@
       crossorigin=""
     ></script>
 
-  <!-- App JS (cache bust v=19) -->
-  <script src="/static/js/map.js?v=19"></script>
+  <!-- App JS (cache bust v=20) -->
+  <script src="/static/js/map.js?v=20"></script>
   </body>
 </html>

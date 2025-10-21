@@ -357,6 +357,52 @@ body {
   height: 24px;
 }
 
+/* =================== BOTÃO SCANNER =================== */
+
+.scanner-btn {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  border: none;
+  border-radius: 50%;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+  cursor: pointer;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 0;
+}
+
+.scanner-btn:hover {
+  transform: scale(1.1) rotate(5deg);
+  box-shadow: 0 8px 28px rgba(37, 99, 235, 0.5);
+}
+
+.scanner-btn:active {
+  transform: scale(0.95) rotate(0deg);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
+}
+
+/* Animação de pulso para chamar atenção */
+@keyframes scanner-pulse {
+  0%, 100% {
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+  }
+  50% {
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.7), 0 0 0 8px rgba(37, 99, 235, 0.2);
+  }
+}
+
+.scanner-btn {
+  animation: scanner-pulse 2.5s ease-in-out infinite;
+}
+
 /* =================== ESTADOS VAZIOS =================== */
 
 .empty-state {
@@ -500,6 +546,15 @@ body {
   .toggle-btn svg {
     width: 28px;
     height: 28px;
+  }
+  
+  /* Botão scanner no mobile */
+  .scanner-btn {
+    width: 68px;
+    height: 68px;
+    bottom: 20px;
+    right: 20px;
+    font-size: 34px;
   }
 }
 
