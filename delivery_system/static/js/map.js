@@ -1541,10 +1541,17 @@
     }
   };
 
-  // Busca pacote pelo código e inicia entrega
-  async function findPackageAndDeliver(barcode) {
+  // Busca pacote pelo código e inicia entrega (GLOBAL para funcionar no callback do scanner)
+  window.findPackageAndDeliver = async function(barcode) {
     try {
       console.log('🔍 Buscando pacote com código:', barcode);
+      console.log('📦 Pacotes disponíveis:', packages ? packages.length : 'undefined');
+      
+      // Verifica se pacotes foram carregados
+      if (!packages || !Array.isArray(packages) || packages.length === 0) {
+        alert('❌ Erro: Pacotes ainda não foram carregados!\n\nAguarde o carregamento do mapa e tente novamente.');
+        return;
+      }
       
       // Busca nos pacotes carregados
       const pkg = packages.find(p => 
@@ -1584,10 +1591,10 @@
       console.error('❌ Erro ao buscar pacote:', error);
       alert('❌ Erro ao buscar pacote: ' + error.message);
     }
-  }
+  };
 
-  // Confirma e inicia entrega
-  function confirmAndStartDelivery(pkg, barcode) {
+  // Confirma e inicia entrega (GLOBAL para funcionar no callback do scanner)
+  window.confirmAndStartDelivery = function(pkg, barcode) {
     // Destaca o pacote no mapa
     map.setView([pkg.latitude, pkg.longitude], 17, { animate: true });
     
@@ -1602,9 +1609,11 @@
     
     if (confirmed) {
       console.log('🚀 Iniciando entrega via Telegram para pacote:', pkg.id);
-      startDelivery(pkg.id);
+      // Abre Telegram com deeplink de entrega
+      const telegramUrl = `https://t.me/${botUsername}?start=entrega_deliver_${pkg.id}`;
+      window.open(telegramUrl, '_blank');
     }
-  }
+  };
 
   // Pré-carrega biblioteca ao iniciar mapa
   loadZXingLibrary().catch(err => {
