@@ -33,7 +33,7 @@ from telegram.ext import (
 
 from database import (
     SessionLocal, init_db, User, Route, Package, DeliveryProof,
-    Expense, Income, Mileage, AIReport, LinkToken
+    Expense, Income, Mileage, AIReport, LinkToken, SalaryPayment
 )
 from sqlalchemy import func, text, and_, or_, distinct  # ✅ FASE 4.1: Importa utilitários para queries SQL
 import html
@@ -824,16 +824,27 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             
             "*🆕 /importar*\n"
-            "Importa planilha Excel ou CSV com endereços de entrega.\n"
-            "• Suporta múltiplos formatos\n"
-            "• Geocodificação automática\n"
-            "• Você escolhe o nome da rota\n\n"
+            "Importa planilha Excel ou CSV com endereços.\n"
+            "• Suporta múltiplos formatos (Excel, CSV)\n"
+            "• Geocodificação automática de endereços\n"
+            "• Validação de dados na importação\n"
+            "• Você escolhe o nome da rota\n"
+            "• Receita automática: R$ 260 (padrão)\n\n"
             
             "*🚚 /enviarrota*\n"
             "Atribui uma rota para um motorista.\n"
             "• Otimização automática de percurso\n"
-            "• Gera link de rastreamento\n"
+            "• Cálculo automático de salário (R$ 100/R$ 50)\n"
+            "• Gera link de rastreamento interativo\n"
             "• Notifica motorista no Telegram\n\n"
+            
+            "*📋 /rotas*\n"
+            "Lista todas as rotas do sistema.\n"
+            "• Ver detalhes completos de cada rota\n"
+            "• 🗺️ Rastrear: acompanhe GPS em tempo real\n"
+            "• 🏁 Finalizar: registre KM, despesas, receitas\n"
+            "• 🗑️ Deletar: remova rotas se necessário\n"
+            "• Filtros por status: pendente/ativa/finalizada\n\n"
             
             "*🗺️ Rastrear:* abra /rotas e toque em '🗺️ Rastrear'\n"
             "Acompanha rotas ativas em tempo real.\n"
@@ -842,10 +853,14 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "• Status detalhado de cada entrega\n\n"
             
             "*🏁 Finalizar Rota*\n"
-            "Após entregas concluídas, finalize a rota.\n"
-            "• Registra KM rodados\n"
-            "• Adiciona despesas/receitas extras\n"
-            "• Salva tudo automaticamente no banco\n\n"
+            "Após entregas concluídas, finalize via /rotas.\n"
+            "• Registra KM rodados (Ilha ↔ Rocinha)\n"
+            "• Adiciona despesas extras (combustível, pedágio, etc)\n"
+            "• Adiciona receitas extras (se houver)\n"
+            "• Confirma salário do motorista automaticamente\n"
+            "• Cria pagamento a pagar para quinta-feira\n"
+            "• Salva tudo automaticamente no banco\n"
+            "• ⚠️ Máximo de 5 insucessos permitidos\n\n"
             
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "💡 *Fluxo:* Importar → Enviar → Rastrear → Finalizar",
@@ -903,6 +918,13 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "• Balanço de lucro por dia\n"
             "• Integrado com despesas e receitas\n\n"
             
+            "*💵 /salarios_pendentes*\n"
+            "Gerencia salários a pagar dos motoristas.\n"
+            "• Vencimento toda quinta-feira\n"
+            "• Notificações automáticas (qui 12h)\n"
+            "• Lembretes diários se atrasado (09h)\n"
+            "• Confirmação rápida por botões\n\n"
+            
             "*🤖 /relatorio*\n"
             "Relatório inteligente com IA (Groq).\n"
             "• Análise POR ROTA com margem\n"
@@ -923,7 +945,7 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "• Mantém chat privado limpo\n\n"
             
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💡 *Automação:* Finanças são registradas ao finalizar rotas!",
+            "💡 *Automação:* Finanças e salários registrados automaticamente!",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -977,9 +999,26 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "🔹 Automação 100% de finanças\n\n"
             
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💡 *Outros Comandos:*\n"
-            "/meu_id - Seu Telegram ID\n"
-            "/cancelar - Cancela operação atual",
+            "*� OUTROS COMANDOS:*\n\n"
+            
+            "*🆔 /meu_id*\n"
+            "Exibe seu Telegram ID único.\n\n"
+            
+            "*🐛 /debug*\n"
+            "Informações técnicas do sistema.\n"
+            "• Útil para diagnóstico de problemas\n\n"
+            
+            "*🗑️ /resetar_empresa*\n"
+            "⚠️ PERIGO: Apaga TODOS os dados!\n"
+            "• Requer confirmação explícita\n"
+            "• Use apenas para recomeçar do zero\n\n"
+            
+            "*🚫 /cancelar*\n"
+            "Cancela operação em andamento.\n"
+            "• Útil se estiver no meio de um processo\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Dica:* Finalize rotas diariamente para manter dados precisos!",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -1027,32 +1066,48 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "📸 *PROCESSO DE ENTREGA*\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             
-            "*O QUE VOCÊ PRECISA FAZER:*\n\n"
+            "*ORDEM DAS INFORMAÇÕES:*\n\n"
             
             "*1️⃣ Foto do Pacote*\n"
-            "📦 Tire uma foto mostrando a etiqueta do pacote de forma clara.\n\n"
+            "📦 Tire uma foto mostrando a etiqueta do pacote de forma clara.\n"
+            "   → Primeira foto a ser enviada\n\n"
             
-            "*2️⃣ Foto do Local*\n"
-            "🏠 Tire uma foto da porta, fachada ou da pessoa que recebeu.\n\n"
+            "*2️⃣ Nome do Recebedor*\n"
+            "👤 Digite o nome completo de quem recebeu.\n"
+            "   → Exemplo: 'João da Silva'\n\n"
             
-            "*3️⃣ Nome do Recebedor*\n"
-            "👤 Digite o nome completo de quem assinou/recebeu.\n\n"
-            
-            "*4️⃣ Documento (CPF/RG)*\n"
+            "*3️⃣ Documento (CPF/RG)*\n"
             "🆔 Digite CPF ou RG do recebedor.\n"
-            "   → Se não tiver, digite: *sem documento*\n\n"
+            "   → Se não tiver: digite *sem documento*\n"
+            "   → Aceita com ou sem pontuação\n\n"
             
-            "*5️⃣ Observações (Opcional)*\n"
-            "📝 Adicione informações extras se necessário.\n"
-            "   → Exemplos: 'Porteiro recebeu', 'Deixado na portaria'\n\n"
+            "*4️⃣ Observações*\n"
+            "📝 Adicione informações extras.\n"
+            "   → Exemplos: 'Porteiro recebeu', 'Deixado na portaria'\n"
+            "   → Se não tiver observações: digite *sem observação*\n\n"
+            
+            "*5️⃣ Foto da Fachada/Local*\n"
+            "🏠 Tire uma foto da porta, fachada ou da pessoa.\n"
+            "   → Última foto, após todas as informações\n\n"
             
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "*⚠️ IMPORTANTE:*\n\n"
             
             "✅ Fotos sempre claras e nítidas\n"
             "✅ Evite fotos borradas ou escuras\n"
-            "✅ Mostre a etiqueta completa\n"
-            "✅ Documento é obrigatório (ou 'sem documento')\n\n"
+            "✅ Mostre a etiqueta completa na 1ª foto\n"
+            "✅ Documento é obrigatório (ou 'sem documento')\n"
+            "✅ Siga sempre esta ordem: Foto1 → Nome → Doc → Obs → Foto2\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "*❌ EM CASO DE INSUCESSO:*\n\n"
+            
+            "Se não conseguir entregar:\n"
+            "• Clique em '✕ Insucesso' no mapa\n"
+            "• Selecione o motivo (ausente, recusou, endereço errado)\n"
+            "• Tire foto do local como prova\n"
+            "• Adicione observações detalhadas\n"
+            "• ⚠️ Máximo de 5 insucessos por rota\n\n"
             
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "💡 *Dica:* Fotos de qualidade evitam problemas futuros!",
@@ -1084,14 +1139,20 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "*CORES DOS PINS:*\n\n"
             
-            "🔵 *Azul* → Pacote Pendente\n"
-            "   (Ainda não foi entregue)\n\n"
+            "�🟠�🔵 *Coloridos com Números* → Pendentes\n"
+            "   → Máximo 3 áreas coloridas\n"
+            "   → Números mostram ordem otimizada\n"
+            "   → Clique para ver detalhes e ações\n\n"
             
-            "🟢 *Verde* → Entregue com Sucesso ✅\n"
-            "   (Confirmado com comprovante)\n\n"
+            "🟢 *Verde com ✓* → Entregue com Sucesso\n"
+            "   → Confirmado com comprovante completo\n"
+            "   → Número some após entrega\n"
+            "   → Sem ações disponíveis\n\n"
             
-            "🔴 *Vermelho* → Falha na Entrega ❌\n"
-            "   (Cliente ausente, endereço errado, etc)\n\n"
+            "🔴 *Vermelho com ✕* → Falha na Entrega\n"
+            "   → Cliente ausente, recusou, etc\n"
+            "   → Número some após falha\n"
+            "   → Botão 'Tentar Novamente' disponível\n\n"
             
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "*💡 DICAS:*\n\n"
@@ -1116,27 +1177,40 @@ async def help_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             
             "*PRINCIPAIS:*\n\n"
             
-            "*📦 /entregar*\n"
+            "*� /start*\n"
+            "Primeiro comando ao usar o bot.\n"
+            "• Registra você no sistema\n"
+            "• Mostra boas-vindas e instruções\n\n"
+            
+            "*�📦 /entregar ou /entrega*\n"
             "Registra a entrega de um pacote.\n"
             "• Envia fotos e dados do recebedor\n"
-            "• Gera comprovante automático\n\n"
+            "• Gera comprovante automático\n"
+            "• Notifica o gerente em tempo real\n\n"
+            
+            "*🔄 /iniciar*\n"
+            "Retorna ao menu principal.\n"
+            "• Use quando precisar recomeçar\n\n"
             
             "*🏠 /configurarcasa*\n"
             "Define seu endereço de partida.\n"
             "• Envia sua localização GPS\n"
             "• Rotas otimizadas a partir da sua casa\n"
-            "• Economia de combustível\n\n"
+            "• Economia de combustível e tempo\n\n"
             
             "*🆔 /meu_id*\n"
             "Mostra seu Telegram ID.\n"
-            "• Útil para cadastro com o gerente\n\n"
+            "• Útil para cadastro com o gerente\n"
+            "• Compartilhe com o gerente se necessário\n\n"
             
             "*❓ /help*\n"
-            "Exibe este menu de ajuda.\n\n"
+            "Exibe este menu de ajuda.\n"
+            "• Sempre disponível para consulta\n\n"
             
             "*🚫 /cancelar*\n"
             "Cancela a operação atual.\n"
-            "• Use se estiver no meio de um processo\n\n"
+            "• Use se estiver no meio de um processo\n"
+            "• Retorna ao estado normal\n\n"
             
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "*📱 NOTIFICAÇÕES AUTOMÁTICAS:*\n\n"
@@ -2947,6 +3021,28 @@ async def finalize_km_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # ✅ Marca rota como finalizada
             route.status = "finalized"
             route.finalized_at = datetime.now()
+            
+            # ✅ Cria registro de salário a pagar (próxima quinta-feira)
+            from datetime import timedelta
+            today = datetime.now().date()
+            days_until_thursday = (3 - today.weekday()) % 7  # Thursday = 3
+            if days_until_thursday == 0:  # Se hoje é quinta, vai para próxima quinta
+                days_until_thursday = 7
+            next_thursday = today + timedelta(days=days_until_thursday)
+            
+            salary_payment = SalaryPayment(
+                driver_id=route.assigned_to_id,
+                route_id=route.id,
+                amount=route.driver_salary,
+                week_start=route.created_at.date() if route.created_at else today,
+                week_end=today,
+                due_date=next_thursday,
+                status='pending',
+                notes=f"Salário ref. rota {route_name}",
+                created_by=update.effective_user.id
+            )
+            db.add(salary_payment)
+            
             db.commit()
             
             # Busca informações para mensagem final (route_name já definido)
@@ -6074,6 +6170,10 @@ def setup_bot_handlers(app: Application):
     app.add_handler(CommandHandler("relatorio", cmd_relatorio))
     app.add_handler(CommandHandler("configurar_canal_analise", cmd_configurar_canal_analise))
     app.add_handler(CommandHandler("meus_registros", cmd_meus_registros))
+    # Gerenciamento de salários
+    app.add_handler(CommandHandler("salarios_pendentes", cmd_salarios_pendentes))
+    app.add_handler(CallbackQueryHandler(on_confirm_salary, pattern=r"^confirm_salary:\d+$"))
+    app.add_handler(CallbackQueryHandler(on_confirm_salary_all, pattern=r"^confirm_salary_all:"))
     # /rastrear removido (rastreio via /rotas -> botão "🗺️ Rastrear")
     app.add_handler(CommandHandler("chat_ia", cmd_chat_ia))
     app.add_handler(CommandHandler("chatia", cmd_chat_ia))
@@ -6250,10 +6350,217 @@ def setup_bot_handlers(app: Application):
     app.add_error_handler(on_error)
 
 
+# ================================================================================
+# GERENCIAMENTO DE SALÁRIOS
+# ================================================================================
+
+async def cmd_salarios_pendentes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lista todos os salários pendentes/atrasados com opções de confirmação"""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_user_id == update.effective_user.id).first()
+        if not user or user.role not in ['manager', 'admin']:
+            await update.message.reply_text("❌ Você não tem permissão para acessar esta função.")
+            return
+        
+        # Busca salários pendentes e atrasados
+        from sqlalchemy import or_
+        pending_payments = db.query(SalaryPayment).filter(
+            SalaryPayment.status.in_(['pending', 'overdue'])
+        ).order_by(SalaryPayment.due_date.asc()).all()
+        
+        if not pending_payments:
+            await update.message.reply_text(
+                "✅ *Nenhum salário pendente!*\n\n"
+                "Todos os pagamentos estão em dia.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Agrupa por motorista
+        from collections import defaultdict
+        by_driver = defaultdict(list)
+        for payment in pending_payments:
+            by_driver[payment.driver_id].append(payment)
+        
+        today = datetime.now().date()
+        total_pending = sum(p.amount for p in pending_payments)
+        
+        message = "💰 *SALÁRIOS A PAGAR*\n\n"
+        buttons = []
+        
+        for driver_id, payments in by_driver.items():
+            driver = db.get(User, driver_id)
+            driver_name = driver.full_name if driver else "Desconhecido"
+            total_driver = sum(p.amount for p in payments)
+            
+            message += f"👤 *{driver_name}*\n"
+            for payment in payments:
+                status_emoji = "⏰" if payment.status == 'pending' else "🔴"
+                overdue_text = ""
+                if payment.due_date < today:
+                    days_overdue = (today - payment.due_date).days
+                    overdue_text = f" (⚠️ {days_overdue} dias de atraso)"
+                
+                route_info = f"Rota #{payment.route_id}" if payment.route_id else "Avulso"
+                message += f"  {status_emoji} {route_info} - R$ {payment.amount:.2f}\n"
+                message += f"     Vencimento: {payment.due_date.strftime('%d/%m/%Y')}{overdue_text}\n"
+                
+                # Botão individual
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"✅ Confirmar R$ {payment.amount:.2f} ({driver_name[:15]})",
+                        callback_data=f"confirm_salary:{payment.id}"
+                    )
+                ])
+            
+            message += f"  💵 Subtotal: R$ {total_driver:.2f}\n\n"
+        
+        message += f"💰 *TOTAL A PAGAR: R$ {total_pending:.2f}*\n\n"
+        message += "👇 Selecione um pagamento para confirmar:"
+        
+        # Botão para confirmar todos
+        if len(pending_payments) > 1:
+            all_ids = ",".join(str(p.id) for p in pending_payments)
+            buttons.append([
+                InlineKeyboardButton(
+                    f"✅ CONFIRMAR TODOS (R$ {total_pending:.2f})",
+                    callback_data=f"confirm_salary_all:{all_ids}"
+                )
+            ])
+        
+        keyboard = InlineKeyboardMarkup(buttons)
+        await update.message.reply_text(message, parse_mode='Markdown', reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error(f"Erro em cmd_salarios_pendentes: {e}")
+        await update.message.reply_text("❌ Erro ao buscar salários pendentes.")
+    finally:
+        db.close()
+
+
+async def on_confirm_salary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirma pagamento de um salário individual"""
+    query = update.callback_query
+    await query.answer()
+    
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_user_id == update.effective_user.id).first()
+        if not user or user.role not in ['manager', 'admin']:
+            await query.edit_message_text("❌ Você não tem permissão para confirmar pagamentos.")
+            return
+        
+        # Extrai ID do pagamento
+        payment_id = int(query.data.split(':')[1])
+        payment = db.get(SalaryPayment, payment_id)
+        
+        if not payment:
+            await query.edit_message_text("❌ Pagamento não encontrado.")
+            return
+        
+        if payment.status == 'paid':
+            await query.edit_message_text("⚠️ Este pagamento já foi confirmado anteriormente.")
+            return
+        
+        # Confirma pagamento
+        payment.status = 'paid'
+        payment.paid_date = datetime.now()
+        payment.confirmed_by = update.effective_user.id
+        db.commit()
+        
+        # Busca informações para mensagem
+        driver = db.get(User, payment.driver_id) if payment.driver_id else None
+        driver_name = driver.full_name if driver else "Desconhecido"
+        route_info = f"Rota #{payment.route_id}" if payment.route_id else "Avulso"
+        
+        await query.edit_message_text(
+            f"✅ *Pagamento Confirmado!*\n\n"
+            f"👤 Motorista: {driver_name}\n"
+            f"📋 {route_info}\n"
+            f"💰 Valor: R$ {payment.amount:.2f}\n"
+            f"📅 Vencimento: {payment.due_date.strftime('%d/%m/%Y')}\n"
+            f"✅ Pago em: {payment.paid_date.strftime('%d/%m/%Y %H:%M')}\n\n"
+            f"Use /salarios_pendentes para ver outros pagamentos.",
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        logger.error(f"Erro em on_confirm_salary: {e}")
+        await query.edit_message_text("❌ Erro ao confirmar pagamento.")
+    finally:
+        db.close()
+
+
+async def on_confirm_salary_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirma múltiplos pagamentos de uma vez"""
+    query = update.callback_query
+    await query.answer()
+    
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_user_id == update.effective_user.id).first()
+        if not user or user.role not in ['manager', 'admin']:
+            await query.edit_message_text("❌ Você não tem permissão para confirmar pagamentos.")
+            return
+        
+        # Extrai IDs dos pagamentos
+        ids_str = query.data.split(':')[1]
+        payment_ids = [int(x) for x in ids_str.split(',')]
+        
+        payments = db.query(SalaryPayment).filter(SalaryPayment.id.in_(payment_ids)).all()
+        
+        if not payments:
+            await query.edit_message_text("❌ Nenhum pagamento encontrado.")
+            return
+        
+        # Confirma todos os pagamentos pendentes/atrasados
+        confirmed_count = 0
+        total_amount = 0
+        now = datetime.now()
+        
+        for payment in payments:
+            if payment.status in ['pending', 'overdue']:
+                payment.status = 'paid'
+                payment.paid_date = now
+                payment.confirmed_by = update.effective_user.id
+                confirmed_count += 1
+                total_amount += payment.amount
+        
+        db.commit()
+        
+        await query.edit_message_text(
+            f"✅ *Pagamentos Confirmados em Lote!*\n\n"
+            f"📊 Quantidade: {confirmed_count} pagamento(s)\n"
+            f"💰 Total: R$ {total_amount:.2f}\n"
+            f"✅ Confirmado em: {now.strftime('%d/%m/%Y %H:%M')}\n\n"
+            f"Use /salarios_pendentes para ver pagamentos restantes.",
+            parse_mode='Markdown'
+        )
+        
+    except Exception as e:
+        logger.error(f"Erro em on_confirm_salary_all: {e}")
+        await query.edit_message_text("❌ Erro ao confirmar pagamentos.")
+    finally:
+        db.close()
+
+
 def main():
+    from scheduler import start_scheduler
+    
+    # Inicia o scheduler de notificações
+    scheduler = start_scheduler()
+    
+    # Inicia o bot
     app = build_application()
     print("Bot iniciado. Pressione Ctrl+C para sair.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    
+    try:
+        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    except (KeyboardInterrupt, SystemExit):
+        print("\n🛑 Encerrando bot e scheduler...")
+        scheduler.shutdown()
+        print("✅ Bot encerrado com sucesso!")
 
 
 if __name__ == "__main__":

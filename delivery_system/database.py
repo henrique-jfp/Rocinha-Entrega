@@ -242,6 +242,46 @@ class LinkToken(Base):
     data: Mapped[dict] = mapped_column(JSON, nullable=False)       # payload (ex.: {"ids":[...]})
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
+
+class SalaryPayment(Base):
+    """Gerenciamento de salários a pagar - Quintas-feiras"""
+    __tablename__ = "salary_payment"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    driver_id: Mapped[int] = mapped_column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    route_id: Mapped[int] = mapped_column(Integer, ForeignKey("route.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)  # Valor do salário
+    
+    # Período da semana de trabalho
+    week_start: Mapped[datetime] = mapped_column(Date, nullable=False)
+    week_end: Mapped[datetime] = mapped_column(Date, nullable=False)
+    
+    # Datas de vencimento e pagamento
+    due_date: Mapped[datetime] = mapped_column(Date, nullable=False, index=True)  # Quinta-feira
+    paid_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # Quando foi pago
+    
+    # Status: pending (aguardando quinta), overdue (quinta passou), paid (confirmado)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
+    
+    # Observações
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Quem criou e confirmou
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=False)
+    confirmed_by: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("user.telegram_user_id"), nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # relationships
+    driver: Mapped[User] = relationship()
+    route: Mapped[Route] = relationship()
+
+    __table_args__ = (
+        CheckConstraint("status in ('pending','overdue','paid')", name="ck_salary_payment_status"),
+    )
+
+
 def init_db() -> None:
     """Create all tables if not exist."""
     Base.metadata.create_all(bind=engine)
