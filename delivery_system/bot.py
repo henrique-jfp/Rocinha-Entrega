@@ -4634,27 +4634,7 @@ async def photo1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
     context.user_data["photo1_file_id"] = photo.file_id
     await update.message.reply_text(
-        "📸 *Comprovante de Entrega - Passo 2/5*\n\n"
-        "Agora envie a *segunda foto do local da entrega* (porta, fachada ou recebedor).\n\n"
-        "_Dica: Mostre o contexto da entrega para comprovar o local._",
-        parse_mode='Markdown'
-    )
-    return PHOTO2
-
-
-async def photo2(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.photo:
-        await update.message.reply_text(
-            "⚠️ *Foto Necessária*\n\n"
-            "Por favor, envie uma foto válida.",
-            parse_mode='Markdown'
-        )
-        return PHOTO2
-    # Não baixa arquivo. Guarda apenas o file_id do Telegram
-    photo = update.message.photo[-1]
-    context.user_data["photo2_file_id"] = photo.file_id
-    await update.message.reply_text(
-        "✏️ *Comprovante de Entrega - Passo 3/5*\n\n"
+        "✏️ *Comprovante de Entrega - Passo 2/5*\n\n"
         "Informe o *nome completo* de quem recebeu o pacote.",
         parse_mode='Markdown'
     )
@@ -4685,10 +4665,10 @@ async def recv_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["receiver_document"] = text or "sem documento"
     kb = ReplyKeyboardMarkup([["⏭️ Pular"]], resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(
-        "📝 *Comprovante de Entrega - Passo 5/5*\n\n"
+        "📝 *Comprovante de Entrega - Passo 4/5*\n\n"
         "Tem alguma *observação* sobre esta entrega?\n"
         "_(Exemplo: porteiro recebeu, deixado na portaria, etc)_\n\n"
-        "💡 Ou pressione *'Pular'* para finalizar.",
+        "💡 Ou pressione *'Pular'* para continuar.",
         reply_markup=kb,
         parse_mode='Markdown'
     )
@@ -4700,6 +4680,27 @@ async def recv_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text.lower() == "pular" or text.startswith("⏭️"):
         text = None
     context.user_data["notes"] = text
+    await update.message.reply_text(
+        "📸 *Comprovante de Entrega - Passo 5/5*\n\n"
+        "Por fim, envie a *foto do local da entrega* (porta, fachada ou recebedor).\n\n"
+        "_Dica: Mostre o contexto da entrega para comprovar o local._",
+        parse_mode='Markdown',
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return PHOTO2
+
+
+async def photo2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.photo:
+        await update.message.reply_text(
+            "⚠️ *Foto Necessária*\n\n"
+            "Por favor, envie uma foto válida.",
+            parse_mode='Markdown'
+        )
+        return PHOTO2
+    # Não baixa arquivo. Guarda apenas o file_id do Telegram
+    photo = update.message.photo[-1]
+    context.user_data["photo2_file_id"] = photo.file_id
     
     # ✅ FASE 2.1: CONFIRMAÇÃO INSTANTÂNEA
     # Confirma recebimento dos dados IMEDIATAMENTE (< 500ms)

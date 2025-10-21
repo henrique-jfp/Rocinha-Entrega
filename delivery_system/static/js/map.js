@@ -283,44 +283,60 @@
     }
     
     // Pin individual - gota/lágrima estilo SPX
-    // Adiciona checkmark verde ou X vermelho para entregue/falhou
-    let statusIcon = '';
+    // Se entregue ou falhou, mostra apenas ícone (SEM número)
+    // Se pendente, mostra número
+    let centerContent = '';
+    
     if(status === 'delivered') {
-      statusIcon = `<div style="
+      // PIN VERDE COM CHECKMARK (SEM NÚMERO)
+      centerContent = `<div style="
         position: absolute;
-        top: -4px;
-        right: -4px;
-        width: 16px;
-        height: 16px;
-        background: #10b981;
-        border: 2px solid #fff;
-        border-radius: 50%;
+        top: 6px;
+        left: 6px;
+        width: 24px;
+        height: 24px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 10px;
-        z-index: 2;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        color: #fff;
+        font-weight: 900;
+        font-size: 18px;
+        z-index: 1;
       ">✓</div>`;
     } else if(status === 'failed') {
-      statusIcon = `<div style="
+      // PIN VERMELHO COM X (SEM NÚMERO)
+      centerContent = `<div style="
         position: absolute;
-        top: -4px;
-        right: -4px;
-        width: 16px;
-        height: 16px;
-        background: #ef4444;
-        border: 2px solid #fff;
-        border-radius: 50%;
+        top: 6px;
+        left: 6px;
+        width: 24px;
+        height: 24px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 10px;
-        font-weight: 900;
         color: #fff;
-        z-index: 2;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        font-weight: 900;
+        font-size: 18px;
+        z-index: 1;
       ">✕</div>`;
+    } else {
+      // PIN COLORIDO COM NÚMERO (PENDENTE)
+      centerContent = `<div style="
+        position: absolute;
+        top: 6px;
+        left: 6px;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-weight: 800;
+        font-size: 13px;
+        font-family: 'Inter', sans-serif;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        z-index: 1;
+      ">${number}</div>`;
     }
     
     const html = `
@@ -339,26 +355,8 @@
         border: 3px solid #fff;
       "></div>
       
-      <!-- Número dentro -->
-      <div style="
-        position: absolute;
-        top: 6px;
-        left: 6px;
-        width: 24px;
-        height: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #fff;
-        font-weight: 800;
-        font-size: 13px;
-        font-family: 'Inter', sans-serif;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-        z-index: 1;
-      ">${number}</div>
-      
-      <!-- Ícone de status (checkmark ou X) -->
-      ${statusIcon}
+      <!-- Conteúdo central (número OU ícone) -->
+      ${centerContent}
     </div>`;
     
     return L.divIcon({
