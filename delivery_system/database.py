@@ -274,8 +274,8 @@ class SalaryPayment(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # relationships
-    driver: Mapped[User] = relationship()
-    route: Mapped[Route] = relationship()
+    driver: Mapped[User] = relationship(foreign_keys=[driver_id])
+    route: Mapped[Route] = relationship(foreign_keys=[route_id])
 
     __table_args__ = (
         CheckConstraint("status in ('pending','overdue','paid')", name="ck_salary_payment_status"),
