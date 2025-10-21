@@ -378,6 +378,73 @@
     const address = pkg.address || 'Sem endereço';
     const track = pkg.tracking_code || '';
     
+    // Se já entregue: mostrar apenas "Concluído" sem ações
+    if (pkg.status === 'delivered') {
+      return `
+        <div>
+          <div class="popup-code">${track}</div>
+          <div class="popup-addr">${address}</div>
+          <div style="
+            margin-top: 12px;
+            padding: 12px;
+            background: #d1fae5;
+            border-radius: 8px;
+            text-align: center;
+            color: #065f46;
+            font-weight: 700;
+            font-size: 15px;
+          ">
+            ✅ Concluído - Entregue com Sucesso
+          </div>
+          <div style="margin-top: 8px; display: flex; justify-content: center;">
+            <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="
+              padding: 10px 20px; text-align: center; ${hasValid ? '' : 'opacity:0.4; pointer-events:none;'}">
+              🧭 Navegar para Endereço
+            </a>
+          </div>
+        </div>`;
+    }
+    
+    // Se falhou: mantém botão "Entregar" para nova tentativa
+    if (pkg.status === 'failed') {
+      return `
+        <div>
+          <div class="popup-code">${track}</div>
+          <div class="popup-addr">${address}</div>
+          <div style="
+            margin-top: 12px;
+            padding: 12px;
+            background: #fee2e2;
+            border-radius: 8px;
+            text-align: center;
+            color: #991b1b;
+            font-weight: 700;
+            font-size: 14px;
+            margin-bottom: 8px;
+          ">
+            ❌ Insucesso Registrado
+          </div>
+          <div style="
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            gap: 6px;
+            flex-direction: column;
+          ">
+            <a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener" style="
+              display: block; text-align: center; background: #10b981; color: white; font-weight: 800; border: 1px solid #059669; border-radius: 10px; padding: 10px; font-size: 14px; text-decoration: none;">
+              ✓ Tentar Entregar Novamente
+            </a>
+            <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="
+              display: block; text-align: center; padding: 10px; ${hasValid ? '' : 'opacity:0.4; pointer-events:none;'}">
+              🧭 Navegar para Endereço
+            </a>
+          </div>
+        </div>`;
+    }
+    
+    // Pendente: fluxo normal
     return `
       <div>
         <div class="popup-code">${track}</div>
@@ -392,7 +459,7 @@
         ">
           <div style="display: flex; gap: 6px; align-items: center;">
             <a class="popup-btn deliver" href="${deliverWeb}" target="_blank" rel="noopener" style="
-              flex: 2; text-align: center; background: #10b981; color: white; font-weight: 800; border: 1px solid #059669; border-radius: 10px; padding: 10px; font-size: 14px;">
+              flex: 2; text-align: center; background: #10b981; color: white; font-weight: 800; border: 1px solid #059669; border-radius: 10px; padding: 10px; font-size: 14px; text-decoration: none;">
               ✓ Entregar
             </a>
             <a class="popup-btn nav" href="${nav}" target="_blank" rel="noopener" style="
@@ -400,19 +467,17 @@
               🧭 Navegar
             </a>
           </div>
-          ${pkg.status === 'pending' ? `
-            <div style="display:flex; gap:6px; margin-top:6px;">
-              <button onclick="markPackageDelivered(${pkg.id})" style="
-                padding: 8px 12px; background: #16a34a; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s; flex:1;" 
-                onmouseover="this.style.background='#15803d'" onmouseout="this.style.background='#16a34a'">
-                ✅ Marcar Entregue (Rápido)
-              </button>
-              <a class="popup-btn fail" href="${failWeb}" target="_blank" rel="noopener" style="
-                flex:1; text-align:center; background:#ef4444; color:white; border-radius:6px; padding:8px 12px; font-weight:600; font-size:13px; text-decoration:none;">
-                ❌ Insucesso
-              </a>
-            </div>
-          ` : ''}
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            <button onclick="markPackageDelivered(${pkg.id})" style="
+              padding: 8px 12px; background: #16a34a; color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s; flex:1;" 
+              onmouseover="this.style.background='#15803d'" onmouseout="this.style.background='#16a34a'">
+              ✅ Marcar Entregue (Rápido)
+            </button>
+            <a class="popup-btn fail" href="${failWeb}" target="_blank" rel="noopener" style="
+              flex:1; text-align:center; background:#ef4444; color:white; border-radius:6px; padding:8px 12px; font-weight:600; font-size:13px; text-decoration:none;">
+              ❌ Insucesso
+            </a>
+          </div>
         </div>
       </div>`;
   }

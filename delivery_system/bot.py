@@ -35,7 +35,7 @@ from database import (
     SessionLocal, init_db, User, Route, Package, DeliveryProof,
     Expense, Income, Mileage, AIReport, LinkToken
 )
-from sqlalchemy import func, text, and_, distinct  # ✅ FASE 4.1: Importa utilitários para queries SQL
+from sqlalchemy import func, text, and_, or_, distinct  # ✅ FASE 4.1: Importa utilitários para queries SQL
 import html
 import shutil
 import re
@@ -2479,26 +2479,48 @@ async def on_finalize_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Rota não pode ser finalizada!", show_alert=True)
             return
         
+        # ✅ VALIDAÇÃO: Máximo 5 insucessos permitidos
+        total_packages = db.query(Package).filter(Package.route_id == route_id).count()
+        delivered = db.query(Package).filter(Package.route_id == route_id, Package.status == "delivered").count()
+        failed = db.query(Package).filter(Package.route_id == route_id, Package.status == "failed").count()
+        pending = total_packages - delivered - failed
+        
+        if failed > 5:
+            await query.answer(
+                f"❌ Não é possível finalizar!\n\n"
+                f"Esta rota tem {failed} insucessos registrados.\n"
+                f"O máximo permitido é 5 devoluções.\n\n"
+                f"📦 Pendentes: {pending}\n"
+                f"❌ Insucessos: {failed}\n\n"
+                f"Por favor, tente entregar mais pacotes antes de finalizar.",
+                show_alert=True
+            )
+            return
+        
         # Busca informações
         route_name = route.name or f"Rota {route.id}"
         driver = db.get(User, route.assigned_to_id) if route.assigned_to_id else None
         driver_name = driver.full_name if driver else "N/A"
-        
-        total_packages = db.query(Package).filter(Package.route_id == route_id).count()
         
         # Monta resumo
         summary = (
             f"📊 *Finalizar Rota*\n\n"
             f"📛 {route_name}\n"
             f"👤 Motorista: {driver_name}\n"
-            f"📦 Pacotes Entregues: {total_packages}\n\n"
+            f"📦 Total: {total_packages} pacotes\n"
+            f"✅ Entregues: {delivered}\n"
+            f"❌ Insucessos: {failed} (máx. 5)\n"
+            f"⏳ Pendentes: {pending}\n\n"
             f"💰 *Financeiro:*\n"
             f"✅ Receita: R$ {route.revenue:.2f}\n"
             f"💼 Salário: R$ {route.driver_salary:.2f}\n"
             f"📊 Lucro Bruto: R$ {route.revenue - route.driver_salary:.2f}\n\n"
-            f"💡 Teve despesas extras nesta rota?\n"
-            f"(combustível, pedágio, manutenção, etc)"
         )
+        
+        if failed > 0:
+            summary += f"⚠️ *{failed} devolução(ões)* será(ão) registrada(s) no sistema.\n\n"
+        
+        summary += f"💡 Teve despesas extras nesta rota?\n(combustível, pedágio, manutenção, etc)"
         
         keyboard = [
             [InlineKeyboardButton("✅ Não, continuar", callback_data=f"finalize_no_expenses:{route_id}")],
@@ -5629,18 +5651,47 @@ async def cmd_chat_ia(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return html.escape(str(s or "")).replace("\n", " ")
 
     def _kpis(db, start_date, end_date):
-        # Totais de receitas e despesas
+        # ✅ Totais de receitas e despesas - APENAS DE ROTAS FINALIZADAS
+        # Receitas que NÃO têm route_id (extras gerais) OU que pertencem a rotas finalizadas
         income_total = db.query(func.coalesce(func.sum(Income.amount), 0.0)).filter(
-            and_(Income.date >= start_date, Income.date <= end_date)
+            and_(
+                Income.date >= start_date, 
+                Income.date <= end_date,
+                or_(
+                    Income.route_id.is_(None),  # Receitas sem rota (gerais)
+                    Income.route_id.in_(  # Ou receitas de rotas finalizadas
+                        db.query(Route.id).filter(Route.status == 'finalized')
+                    )
+                )
+            )
         ).scalar() or 0.0
 
+        # Despesas que NÃO têm route_id (extras gerais) OU que pertencem a rotas finalizadas
         expense_total = db.query(func.coalesce(func.sum(Expense.amount), 0.0)).filter(
-            and_(Expense.date >= start_date, Expense.date <= end_date)
+            and_(
+                Expense.date >= start_date, 
+                Expense.date <= end_date,
+                or_(
+                    Expense.route_id.is_(None),  # Despesas sem rota (gerais)
+                    Expense.route_id.in_(  # Ou despesas de rotas finalizadas
+                        db.query(Route.id).filter(Route.status == 'finalized')
+                    )
+                )
+            )
         ).scalar() or 0.0
 
-        # Quebra por tipo de despesa
+        # Quebra por tipo de despesa - APENAS DE ROTAS FINALIZADAS
         expense_rows = db.query(Expense.type, func.coalesce(func.sum(Expense.amount), 0.0)).filter(
-            and_(Expense.date >= start_date, Expense.date <= end_date)
+            and_(
+                Expense.date >= start_date, 
+                Expense.date <= end_date,
+                or_(
+                    Expense.route_id.is_(None),
+                    Expense.route_id.in_(
+                        db.query(Route.id).filter(Route.status == 'finalized')
+                    )
+                )
+            )
         ).group_by(Expense.type).all()
         expense_breakdown = {t: float(v or 0.0) for (t, v) in expense_rows}
 
