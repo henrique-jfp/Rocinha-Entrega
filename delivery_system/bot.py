@@ -3876,37 +3876,51 @@ async def on_select_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
         count = db.query(Package).filter(Package.route_id == route.id).count()
         route_name = route.name or f"Rota {route.id}"
         driver_name = driver.full_name or f"ID {driver_tid}"
+        link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
         
-        # Edita mensagem para mostrar progresso
+        # ==================== RESPONDE RÁPIDO (evita timeout) ====================
         await query.edit_message_text(
-            f"⏳ *Processando Rota...*\n\n"
+            f"⏳ *Enviando Rota...*\n\n"
             f"📦 *Rota:* {route_name}\n"
             f"👤 *Motorista:* {driver_name}\n"
             f"📊 *Pacotes:* {count}\n"
-            f"💼 *Salário:* R$ {driver_salary:.2f} ({'1ª rota do dia' if driver_salary == 100 else '2ª+ rota'})\n\n"
-            f"🔄 _Otimizando sequência de entregas..._",
+            f"💼 *Salário:* R$ {driver_salary:.2f}\n\n"
+            f"🔄 _Preparando..._",
             parse_mode='Markdown'
         )
         
-        # ==================== OTIMIZAÇÃO DE ROTA POR MOTORISTA ====================
-        # Busca todos os pacotes da rota
-        all_packages = db.query(Package).filter(Package.route_id == route.id).all()
-        
-        # Usa o endereço de casa do motorista (se configurado) ou coordenadas padrão
-        start_lat = driver.home_latitude or DEPOT_LAT
-        start_lon = driver.home_longitude or DEPOT_LON
-        
-        # Otimiza a ordem usando TSP com o ponto de partida do motorista
-        optimized_count = optimize_route_packages(db, all_packages, start_lat, start_lon)
-        
-        # Mensagem sobre otimização
-        if driver.home_latitude and driver.home_longitude:
-            opt_msg = f"\n🎯 *Rota otimizada* a partir da casa do motorista!"
-        else:
-            opt_msg = f"\n⚠️ _Motorista sem endereço cadastrado. Use /configurarcasa._"
-        # ========================================================================
-        
-        link = f"{BASE_URL}/map/{route.id}/{driver_tid}"
+        # ==================== OTIMIZAÇÃO EM BACKGROUND ====================
+        # Faz otimização SEM bloquear a resposta do Telegram
+        opt_msg = ""
+        try:
+            all_packages = db.query(Package).filter(Package.route_id == route.id).all()
+            start_lat = driver.home_latitude or DEPOT_LAT
+            start_lon = driver.home_longitude or DEPOT_LON
+            
+            # Roda em timeout máximo de 3 segundos (evita travar)
+            import asyncio
+            from concurrent.futures import ThreadPoolExecutor
+            
+            with ThreadPoolExecutor() as pool:
+                loop = asyncio.get_event_loop()
+                future = loop.run_in_executor(
+                    pool, 
+                    optimize_route_packages, 
+                    db, all_packages, start_lat, start_lon
+                )
+                
+                try:
+                    await asyncio.wait_for(future, timeout=3.0)
+                    if driver.home_latitude and driver.home_longitude:
+                        opt_msg = "\n🎯 *Rota otimizada* a partir da casa!"
+                    else:
+                        opt_msg = "\n⚠️ _Sem endereço. Use /configurarcasa._"
+                except asyncio.TimeoutError:
+                    opt_msg = "\n⏳ _Otimização continua em background..._"
+        except Exception as e:
+            logger.error(f"Erro na otimização: {e}")
+            opt_msg = ""
+        # ==================================================================
         
         try:
             await context.bot.send_message(
