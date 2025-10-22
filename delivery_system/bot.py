@@ -369,6 +369,12 @@ def parse_import_dataframe(df: pd.DataFrame) -> tuple[list[dict], dict]:
                     report['warnings'].append(f"Linha {idx+2}: Longitude não numérica - código: {tracking_code}")
                     lng = None
 
+            # Converte row para dict e substitui NaN por None (JSON válido)
+            import math
+            raw_dict = row.to_dict()
+            # Remove NaN e substitui por None
+            raw_dict = {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in raw_dict.items()}
+            
             items.append(
                 {
                     "tracking_code": tracking_code,
@@ -376,7 +382,7 @@ def parse_import_dataframe(df: pd.DataFrame) -> tuple[list[dict], dict]:
                     "neighborhood": neighborhood,
                     "latitude": lat,
                     "longitude": lng,
-                    "raw_data": row.to_dict(),
+                    "raw_data": raw_dict,
                 }
             )
             report['rows_valid'] += 1
