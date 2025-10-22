@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia todo o código do delivery_system
 COPY delivery_system/ ./
 
+# Copia script de startup para migrations
+COPY startup.py ./
+
 ENV PYTHONPATH=/app
 
 # Inicia a aplicação unificada (FastAPI + Bot webhook)
